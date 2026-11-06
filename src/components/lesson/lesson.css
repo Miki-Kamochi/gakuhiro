@@ -1,0 +1,799 @@
+/* Layout: one reading column (~66ch) on a full-bleed grid; labs and figures break out wider. */
+.ls-lesson {
+  /* Color */
+  --paper: #f6f7fa;
+  --ink: #161a26;
+  --muted: #586074;
+  --rule: #dde1ea;
+  --accent: #2f49c6;
+  --accent-soft: #e9edfb;
+  --good: #1d7a4b;
+  --bad: #b3261e;
+  /* Figures are drawn on a dark detector panel in both themes */
+  --panel: #0d111d;
+  --panel-raised: #161c2d;
+  --panel-ink: #c9d1e8;
+  --panel-muted: #7f89a6;
+  /* Type */
+  --serif: var(--font-literata, "Literata"), Georgia, "Times New Roman", serif;
+  --sans: var(--font-geist-sans, "Geist"), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+
+  flex: 1;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 3rem 5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ls-lesson {
+    --paper: #10131c;
+    --ink: #e6e8ef;
+    --muted: #9aa1b5;
+    --rule: #272c3b;
+    --accent: #93a6ff;
+    --accent-soft: #1a2140;
+    --good: #5ccb8f;
+    --bad: #ff8a80;
+    --panel: #080b14;
+    --panel-raised: #121726;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] .ls-lesson {
+  --paper: #10131c;
+  --ink: #e6e8ef;
+  --muted: #9aa1b5;
+  --rule: #272c3b;
+  --accent: #93a6ff;
+  --accent-soft: #1a2140;
+  --good: #5ccb8f;
+  --bad: #ff8a80;
+  --panel: #080b14;
+  --panel-raised: #121726;
+  color-scheme: dark;
+}
+
+.ls-article {
+  display: grid;
+  grid-template-columns: 1fr min(42rem, 100%) 1fr;
+  row-gap: 0;
+}
+
+.ls-article > *,
+.ls-section > * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+/* Sections share the article's columns so a figure inside one can still break out wide */
+.ls-article > .ls-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+}
+
+.ls-article > .ls-wide,
+.ls-section > .ls-wide {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(100%, 58rem);
+}
+
+/* ---------- Header ---------- */
+
+.ls-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ls-eyebrow {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.ls-title {
+  font-family: var(--serif);
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  font-weight: 650;
+  font-variation-settings: "opsz" 60;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  margin: 0;
+}
+
+.ls-lede {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.ls-goals {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 0;
+  padding: 1rem 1.25rem;
+  background: var(--accent-soft);
+  border-radius: 6px;
+}
+
+.ls-goals h2 {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.5rem;
+}
+
+.ls-goals ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+  display: grid;
+  gap: 0.25rem;
+}
+
+/* ---------- Sections ---------- */
+
+.ls-section {
+  margin-top: 3rem;
+}
+
+.ls-article > .ls-continued {
+  margin-top: 0;
+}
+
+.ls-section > h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--serif);
+  font-size: 1.75rem;
+  font-weight: 600;
+  font-variation-settings: "opsz" 40;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  margin: 0 0 1rem;
+}
+
+.ls-sectionNum {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Low-specificity prose defaults, so any component class can override them */
+:where(.ls-article) p {
+  margin: 0 0 1rem;
+  text-wrap: pretty;
+}
+
+:where(.ls-article) strong {
+  font-weight: 650;
+}
+
+.ls-term {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+/* Inline math: italic serif variables, upright numbers */
+.ls-v {
+  font-style: italic;
+  font-family: var(--serif);
+}
+
+.ls-equation {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.25rem 0 1.5rem;
+  padding: 0.75rem 0;
+  border-block: 1px solid var(--rule);
+}
+
+.ls-equationBody {
+  justify-self: center;
+  font-size: 1.5rem;
+  font-family: var(--serif);
+  letter-spacing: 0.02em;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.ls-equationLabel {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ls-frac {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  text-align: center;
+  font-size: 0.9em;
+  line-height: 1.15;
+  margin-inline: 0.15em;
+}
+
+.ls-frac > span:first-child {
+  border-bottom: 1px solid currentColor;
+  padding-inline: 0.2em;
+}
+
+.ls-example {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem 0.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.ls-exampleTitle {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+.ls-steps {
+  font-family: var(--serif);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+  overflow-x: auto;
+}
+
+.ls-aside {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--muted);
+  border-left: 2px solid var(--accent);
+  padding-left: 1rem;
+  margin: 1.5rem 0;
+}
+
+/* ---------- Labs (interactive figures) ---------- */
+
+.ls-lab {
+  margin: 2rem 0 2.5rem;
+  background: var(--panel);
+  color: var(--panel-ink);
+  border-radius: 10px;
+  padding: 1.25rem;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  display: grid;
+  gap: 1rem;
+}
+
+.ls-labHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+}
+
+.ls-labTitle {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffffff;
+  margin: 0;
+}
+
+.ls-labNote {
+  color: var(--panel-muted);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.ls-screen {
+  position: relative;
+  border-radius: 6px;
+  background: #000000;
+  overflow: hidden;
+  aspect-ratio: 3 / 1;
+  max-width: 100%;
+}
+
+.ls-screen canvas,
+.ls-histogram canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ls-histogram {
+  height: 7.5rem;
+  border-radius: 6px;
+  background: var(--panel-raised);
+  overflow: hidden;
+}
+
+.ls-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: -0.5rem;
+}
+
+.ls-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem 1.5rem;
+}
+
+.ls-control {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.ls-controlLabel {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--panel-muted);
+}
+
+.ls-controlValue {
+  font-family: var(--mono);
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
+.ls-slider {
+  width: 100%;
+  accent-color: #93a6ff;
+}
+
+.ls-select {
+  font: inherit;
+  color: #ffffff;
+  background: var(--panel-raised);
+  border: 1px solid #2c3550;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  width: 100%;
+}
+
+.ls-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ls-button {
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--panel-ink);
+  background: var(--panel-raised);
+  border: 1px solid #2c3550;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  cursor: pointer;
+}
+
+.ls-button:hover {
+  border-color: #4a5884;
+  color: #ffffff;
+}
+
+.ls-buttonPrimary {
+  background: #93a6ff;
+  border-color: #93a6ff;
+  color: #0b1024;
+  font-weight: 600;
+}
+
+.ls-buttonPrimary:hover {
+  background: #b3c0ff;
+  border-color: #b3c0ff;
+  color: #0b1024;
+}
+
+.ls-button:focus-visible,
+.ls-slider:focus-visible,
+.ls-select:focus-visible,
+.ls-switch:focus-visible {
+  outline: 2px solid #b3c0ff;
+  outline-offset: 2px;
+}
+
+.ls-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--panel-ink);
+  background: none;
+  border: 0;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.ls-switchTrack {
+  position: relative;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #2c3550;
+  transition: background 150ms ease;
+  flex: none;
+}
+
+.ls-switchTrack::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.25rem - 4px);
+  height: calc(1.25rem - 4px);
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 150ms ease;
+}
+
+.ls-switch[aria-checked="true"] .ls-switchTrack {
+  background: #ffb547;
+}
+
+.ls-switch[aria-checked="true"] .ls-switchTrack::after {
+  transform: translateX(1rem);
+}
+
+.ls-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-size: 0.8125rem;
+  color: var(--panel-muted);
+}
+
+.ls-stats b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+
+.ls-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ls-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.6rem;
+  border-radius: 2px;
+}
+
+.ls-swatchLine {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0;
+  border-top: 2px solid #ffffff;
+}
+
+/* de Broglie calculator */
+
+.ls-result {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.ls-resultLabel {
+  font-size: 0.8125rem;
+  color: var(--panel-muted);
+}
+
+.ls-resultValue {
+  font-family: var(--mono);
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.ls-resultNote {
+  font-size: 0.875rem;
+  color: var(--panel-ink);
+}
+
+.ls-scaleWrap {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.ls-scale {
+  position: relative;
+  min-width: 40rem;
+  height: 4.75rem;
+  margin-inline: 3rem;
+}
+
+.ls-scaleBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2.1rem;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1a2036, #2c3550);
+}
+
+.ls-scaleTick {
+  position: absolute;
+  top: 1.85rem;
+  width: 1px;
+  height: 1.1rem;
+  background: var(--panel-muted);
+}
+
+.ls-scaleTickLabel {
+  position: absolute;
+  top: 3.15rem;
+  transform: translateX(-50%);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--panel-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ls-scaleMarker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  transition: left 120ms ease-out;
+}
+
+.ls-scaleMarkerLabel {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: #0b1024;
+  background: #ffb547;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  white-space: nowrap;
+}
+
+.ls-scaleMarkerPin {
+  width: 2px;
+  height: 1.05rem;
+  background: #ffb547;
+}
+
+/* ---------- Quiz ---------- */
+
+.ls-quiz {
+  display: grid;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.ls-question {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin: 0;
+  min-width: 0;
+}
+
+/* A floated legend sits inside the box instead of on its border, so long questions wrap cleanly */
+.ls-question legend {
+  float: left;
+  width: 100%;
+  font-family: var(--serif);
+  font-weight: 600;
+  line-height: 1.45;
+  padding: 0;
+  text-wrap: pretty;
+}
+
+.ls-qNum {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--accent);
+  margin-right: 0.5rem;
+}
+
+.ls-options {
+  clear: both;
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+}
+
+.ls-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.ls-option:hover {
+  border-color: var(--accent);
+}
+
+.ls-option input {
+  margin: 0.15rem 0 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.ls-optionCorrect {
+  border-color: var(--good);
+  box-shadow: inset 0 0 0 1px var(--good);
+}
+
+.ls-optionWrong {
+  border-color: var(--bad);
+  box-shadow: inset 0 0 0 1px var(--bad);
+}
+
+.ls-feedback {
+  margin: 0.75rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.ls-feedbackVerdictGood {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.ls-feedbackVerdictBad {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.ls-score {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+/* ---------- Summary ---------- */
+
+.ls-tableWrap {
+  overflow-x: auto;
+  margin: 1rem 0 1.5rem;
+}
+
+.ls-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+}
+
+.ls-table th,
+.ls-table td {
+  text-align: left;
+  padding: 0.6rem 0.75rem 0.6rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.ls-table th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ls-table td:first-child {
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  white-space: nowrap;
+}
+
+.ls-takeaways {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  list-style: disc;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ls-footer {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+@media (max-width: 30rem) {
+  .ls-lesson {
+    padding-block: 2rem 4rem;
+    font-size: 1rem;
+  }
+  .ls-equationBody {
+    font-size: 1.25rem;
+  }
+  .ls-lab {
+    padding: 1rem;
+  }
+  .ls-screen {
+    aspect-ratio: 2 / 1;
+  }
+  .ls-switch {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ls-switchTrack,
+  .ls-switchTrack::after,
+  .ls-scaleMarker {
+    transition: none;
+  }
+}
