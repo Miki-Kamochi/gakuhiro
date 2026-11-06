@@ -2,6 +2,8 @@
 
 Tomo is the GOAT.
 
+> Why do programmers prefer dark mode? Because light attracts bugs. 🐛
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
