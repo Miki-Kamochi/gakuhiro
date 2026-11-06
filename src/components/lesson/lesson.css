@@ -154,6 +154,91 @@
   gap: 0.25rem;
 }
 
+.ls-back {
+  align-self: flex-start;
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.ls-back:hover {
+  color: var(--accent);
+}
+
+/* ---------- Table of contents (home page) ---------- */
+
+.ls-toc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ls-tocLink {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.ls-tocLink:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ls-back:focus-visible,
+.ls-tocLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.ls-tocNum {
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5rem;
+}
+
+.ls-tocBody {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.ls-tocTitle {
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ls-tocSummary {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.ls-tocMeta {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.ls-tocArrow {
+  font-family: var(--sans);
+  font-size: 1.25rem;
+  color: var(--accent);
+}
+
 /* ---------- Sections ---------- */
 
 .ls-section {
@@ -793,7 +878,8 @@
 @media (prefers-reduced-motion: reduce) {
   .ls-switchTrack,
   .ls-switchTrack::after,
-  .ls-scaleMarker {
+  .ls-scaleMarker,
+  .ls-tocLink {
     transition: none;
   }
 }

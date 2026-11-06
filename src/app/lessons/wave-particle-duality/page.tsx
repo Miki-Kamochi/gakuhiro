@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import DeBroglieCalculator from "@/components/lesson/DeBroglieCalculator";
 import DoubleSlitLab from "@/components/lesson/DoubleSlitLab";
 import Quiz, { type QuizQuestion } from "@/components/lesson/Quiz";
 import styles from "@/components/lesson/styles";
 
 export const metadata: Metadata = {
-  title: "Wave–Particle Duality · Quantum Physics",
+  title: "Wave–Particle Duality",
   description:
     "Lesson 1 of the quantum physics unit: photons, matter waves, and the double-slit experiment, with interactive labs.",
 };
@@ -69,6 +70,9 @@ export default function WaveParticleDualityLesson() {
     <div className={styles.lesson}>
       <article className={styles.article}>
         <header className={styles.header}>
+          <Link href="/" className={styles.back}>
+            ← All lessons
+          </Link>
           <p className={styles.eyebrow}>Quantum Physics · Lesson 1</p>
           <h1 className={styles.title}>Wave–Particle Duality</h1>
           <p className={styles.lede}>
