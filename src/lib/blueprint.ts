@@ -14,32 +14,34 @@ export const PartSchema = z.object({
   color: z.string().describe("実際の素材に近い色の16進数。例: #b98a5a"),
   source: z.string().describe("写真のどのゴミから作るか（日本語）。例: 段ボール箱"),
   dimensions: z.string().describe("切り出す・用意するサイズ（日本語）。例: 13cm × 14cm を2枚"),
-  make: z.string().describe("この部品の作り方を1〜2文で具体的に（日本語）。例: 段ボールを定規で測り、カッターで切り出す。"),
+  make: z.string().describe("この部品の作り方を1文で具体的に（日本語）。例: 段ボールを定規で測り、カッターで切り出す。"),
   step: z.number().int().describe("この部品を取り付ける手順の番号（1始まり）"),
 });
 
 export const StepSchema = z.object({
   title: z.string().describe("手順のタイトル（日本語、短く）"),
   summary: z.string().describe("この手順で何をするかを1文で（日本語）"),
-  actions: z.array(z.string()).describe("具体的な作業を3〜6個。寸法・位置・道具を含めて（日本語）"),
+  actions: z.array(z.string()).describe("具体的な作業を2〜4個。寸法・位置・道具を含めて短く（日本語）"),
   tip: z.string().describe("うまくいくコツ（日本語）。なければ空文字"),
   caution: z.string().describe("安全上の注意（日本語）。なければ空文字"),
 });
 
+// Field order matters: the response is streamed, so the title shows first and
+// the 3D parts arrive before the (longer) step texts.
 export const BlueprintSchema = z.object({
-  detected: z.object({
-    items: z.array(z.string()).describe("写真に写っている物（日本語）"),
-    materials: z.array(z.string()).describe("素材（日本語）。例: PET樹脂、段ボール"),
-  }),
   title: z.string().describe("作る物の名前（日本語）"),
   tagline: z.string().describe("何ができる物かを1文で（日本語）"),
-  problem_solved: z.string().describe("ユーザーの困りごとをどう解決するか（日本語）"),
+  detected: z.object({
+    items: z.array(z.string()).describe("使うゴミ（日本語）"),
+    materials: z.array(z.string()).describe("素材（日本語）。例: PET樹脂、段ボール"),
+  }),
+  problem_solved: z.string().describe("ユーザーの困りごとをどう解決するか、1〜2文（日本語）"),
   difficulty: z.number().int().describe("1（かんたん）〜5（むずかしい）"),
   time_minutes: z.number().int(),
   tools: z.array(z.string()).describe("必要な道具（日本語）。例: カッター、定規、ガムテープ"),
   co2_saved_g: z.number().describe("新品を買う場合と比べたCO2削減量の概算(g)"),
-  steps: z.array(StepSchema),
   parts: z.array(PartSchema).describe("完成品を構成する部品。切り出す1枚1枚を別の部品にする"),
+  steps: z.array(StepSchema),
 });
 
 export type Blueprint = z.infer<typeof BlueprintSchema>;
