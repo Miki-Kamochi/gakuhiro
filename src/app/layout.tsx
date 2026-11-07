@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "BAKERU — 化ける",
-  description: "Turn trash into something useful with AI-generated 3D DIY builds.",
+  description: "いらないものが、使えるものに化ける。ゴミの写真から、AIが3Dの作り方を生成します。",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
