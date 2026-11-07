@@ -44,7 +44,7 @@ const SNAP = 0.45;
 // Cutting step: each piece is marked (dashed outline), then cut free (lifts and glows).
 const CUT_MARK = 0.5;
 const CUT_LIFT = 0.45;
-const CUT_EACH = 0.6;
+const CUT_EACH = 0.9;
 
 const WHITE = new THREE.Color(0xffffff);
 
@@ -658,7 +658,7 @@ export class ViewerEngine {
   private layoutCutSheet() {
     const list = this.list;
     if (list.length === 0) return;
-    const gap = THREE.MathUtils.clamp(this.radius * 0.08, 1.2, 4);
+    const gap = THREE.MathUtils.clamp(this.radius * 0.14, 2.5, 6);
     let area = 0;
     let widest = 0;
     for (const e of list) {
@@ -1168,7 +1168,8 @@ export class ViewerEngine {
     e.guide.visible = e.arrow.visible = false;
 
     // Label the piece just cut (and the selected / hovered one) with its name and size.
-    const fresh = isCut && lt < CUT_MARK + CUT_EACH * 2.2;
+    // Only the latest cut piece gets an automatic label, so callouts never stack on each other.
+    const fresh = isCut && (lt < CUT_MARK + CUT_EACH || e.cutIndex === this.list.length - 1);
     const want = selected || hovered || (fresh && !dimmed && alpha > 0.5);
     e.label.want = want && pop > 0.5;
     if (want) {
