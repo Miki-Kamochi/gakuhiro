@@ -87,24 +87,25 @@ async function dummyCatalog(): Promise<(Product & { haystack: string })[]> {
  * household trash come first (in this order); things that are hard or odd to
  * make from trash (knives, balls, leather bags…) sink to the bottom.
  */
+// The sweet spot first: big enough for an interesting build (≈6–12 pieces), small and
+// sturdy enough to really make from household trash in under an hour (no electronics,
+// nothing that must carry a person or take hits).
 const SHOWCASE = [
-  "Plant Pot",
-  "Mug Tree Stand",
   "Spice Rack",
-  "Table Lamp",
-  "Lunch Box",
-  "Tray",
+  "Mug Tree Stand",
   "Family Tree Photo Frame",
-  "Monopod",
-  "Basketball Rim",
   "House Showpiece Plant",
+  "Lunch Box",
+  "Table Lamp",
+  "Basketball Rim",
+  "Tray",
+  "Plant Pot",
+  "Women Handbag Black",
   "Ice Cube Tray",
-  "Selfie Lamp with iPhone",
+  "Party Glasses",
 ];
+// Makeable but small or plain, or ambitious (too big, needs strength or electronics).
 const BUILDABLE = new Set([
-  "Decoration Swing",
-  "Selfie Stick Monopod",
-  "Cricket Wicket",
   "Chopping Board",
   "Plate",
   "Black Aluminium Cup",
@@ -112,9 +113,12 @@ const BUILDABLE = new Set([
   "Kitchen Sieve",
   "Fine Mesh Strainer",
   "Feather Shuttlecock",
-  "Party Glasses",
-  "Women Handbag Black",
   "Blue Women's Handbag",
+  "Monopod",
+  "Selfie Stick Monopod",
+  "Cricket Wicket",
+  "Decoration Swing",
+  "Selfie Lamp with iPhone",
 ]);
 
 function demoRank(name: string): number {
