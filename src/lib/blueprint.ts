@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALIGNS, ORIENTATIONS, PLACE_MODES } from "./placement";
 
 const Vec3 = z.object({ x: z.number(), y: z.number(), z: z.number() });
 
@@ -53,6 +54,43 @@ export const BlueprintSchema = z.object({
 export type Blueprint = z.infer<typeof BlueprintSchema>;
 export type Part = z.infer<typeof PartSchema>;
 export type Step = z.infer<typeof StepSchema>;
+
+/**
+ * What the AI writes for each part: no coordinates. It says how the part is
+ * turned and what it sits on / in / next to, and lib/placement.ts computes the
+ * exact position. Field order matters for streaming: placement comes right
+ * after the size so the part can be drawn as soon as possible.
+ */
+export const AIPartSchema = PartSchema.omit({ position: true, rotation: true }).extend({
+  orientation: z
+    .enum(ORIENTATIONS)
+    .describe(
+      "向き。upright=そのまま（筒は縦向き）, upside_down=上下さかさま（逆さにしたボトルの上半分など）, lying_x=筒を左右方向に寝かせる, lying_z=筒を前後方向に寝かせる。板(box)は寝かせず、size の x・y・z で向きを表す",
+    ),
+  tilt_deg: z.number().describe("後ろへの傾き（度）。普通は0。スマホスタンドの背板など、立てかける部品だけ 10〜30"),
+  place: z
+    .object({
+      mode: z
+        .enum(PLACE_MODES)
+        .describe("ground=地面に置く, on=ref の上に載せる, inside=ref（容器）の中の底に入れる, beside=ref の横にくっつけて同じ床に置く, under=ref の下にくっつける"),
+      ref: z.string().describe("基準にする部品の id（この部品より前に書いた部品）。ground のときは空文字"),
+      align: z
+        .enum(ALIGNS)
+        .describe(
+          "on・inside・under: ref の上面（内側）のどこにそろえるか。center=中央, front/back/left/right=その辺にぴったりそろえる。beside: ref のどちら側に付けるか",
+        ),
+      offset: Vec3.describe("さらにずらす量(cm)。普通は 0,0,0。x=右, y=上, z=手前"),
+    })
+    .describe("置き場所。座標は計算されるので書かない"),
+});
+
+export const AIBlueprintSchema = BlueprintSchema.extend({
+  parts: z
+    .array(AIPartSchema)
+    .describe("完成品を構成する部品。切り出す1枚1枚を別の部品にする。土台から順に、支える部品を先に書く"),
+});
+
+export type AIPart = z.infer<typeof AIPartSchema>;
 
 const v = (x: number, y: number, z: number) => ({ x, y, z });
 const CARDBOARD = "#c69a6a";

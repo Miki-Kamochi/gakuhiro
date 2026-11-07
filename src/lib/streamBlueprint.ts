@@ -1,5 +1,6 @@
 import { partialParse } from "@anthropic-ai/sdk/_vendor/partial-json-parser/parser";
-import { PartSchema, StepSchema, type Blueprint } from "@/lib/blueprint";
+import { AIPartSchema, PartSchema, StepSchema, type AIPart, type Blueprint, type Part } from "@/lib/blueprint";
+import { resolveParts } from "@/lib/placement";
 
 /**
  * Turn the half-written JSON from the stream into a displayable Blueprint.
@@ -18,10 +19,20 @@ export function previewBlueprint(text: string): Blueprint | null {
 
   const rawParts = Array.isArray(raw.parts) ? raw.parts : [];
   const partsDone = "steps" in raw;
-  const parts = (partsDone ? rawParts : rawParts.slice(0, -1)).flatMap((p) => {
-    const r = PartSchema.safeParse(p);
-    return r.success ? [r.data] : [];
-  });
+  // The AI writes placements (resolved here, the same way the server does);
+  // the demo replay writes absolute positions.
+  const finished = partsDone ? rawParts : rawParts.slice(0, -1);
+  const placed: AIPart[] = [];
+  const absolute: Part[] = [];
+  for (const p of finished) {
+    const a = AIPartSchema.safeParse(p);
+    if (a.success) placed.push(a.data);
+    else {
+      const r = PartSchema.safeParse(p);
+      if (r.success) absolute.push(r.data);
+    }
+  }
+  const parts = placed.length ? resolveParts(placed, { partial: !partsDone }) : absolute;
 
   const steps = (Array.isArray(raw.steps) ? raw.steps : []).flatMap((s) => {
     const r = StepSchema.partial().safeParse(s);
@@ -51,7 +62,7 @@ export function previewBlueprint(text: string): Blueprint | null {
 export type StreamEvent =
   | { t: "d"; d: string }
   | { t: "reset" }
-  | { t: "final"; blueprint: Blueprint; demo: boolean; ms: number }
+  | { t: "final"; blueprint: Blueprint; demo: boolean; ms: number; quality?: { raw_issues: number; final_issues: number; repaired: boolean } }
   | { t: "e"; error: string };
 
 /** Read an NDJSON response line by line. */

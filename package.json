@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "extension": "node scripts/build-extension.mjs"
+    "extension": "node scripts/build-extension.mjs",
+    "eval": "node scripts/eval-models.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

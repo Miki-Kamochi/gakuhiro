@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { BlueprintSchema, DEMO_BLUEPRINT, PartSchema, type Blueprint } from "@/lib/blueprint";
+import { AIBlueprintSchema, DEMO_BLUEPRINT, PartSchema, type Blueprint } from "@/lib/blueprint";
+import { resolveParts } from "@/lib/placement";
 import { findIssues, settle } from "@/lib/geometry-check";
 
 const SYSTEM = `あなたは「化けラボ」というアップサイクル設計士です。
@@ -19,16 +20,27 @@ const SYSTEM = `あなたは「化けラボ」というアップサイクル設�
 - step には、その部品を取り付ける手順の番号を入れる。部品は5〜12個。
 
 3Dモデル（とても重要。そのまま3D表示されます）:
-- 単位はcm、Yが上、地面は y=0。完成品の中心を x=0, z=0 に置く。position は部品の「中心」。
+- 単位はcm、Yが上、+Zが手前（front）、+Xが右（right）。
+- 座標は書かない。各部品の place で「どの部品の上・中・横に置くか」を言えば、位置はプログラムが正確に計算する。
+  - ground: 地面に置く。最初の部品（土台）は必ず ground。
+  - on: ref の上面に載せる。align で上面の中央か、front/back/left/right の辺にぴったりそろえる。
+  - inside: ref（cup・tray・tube）の内側の底に入れる。中身は容器の内側に合わせて自動で小さくなる。
+  - beside: ref の横（align の側）に、すき間なくくっつけて同じ床に置く。
+  - under: ref の下面にくっつける（つり下げる物）。
+  - ref には必ず、この部品より前に書いた部品の id を書く。土台 → 壁 → 中身 → 飾り の順に書く。
+  - offset は、そろえた位置からさらにずらすときだけ使う（普通は 0,0,0）。例: 板の上で中央から右へ3cm → x=3。
+- 向き: cylinder・cup・tube・cone は upright で縦向き。横に寝かせるなら lying_x（左右に寝かせる）か lying_z（前後に寝かせる）。逆さのボトル上半分は upside_down。立てかける板は tilt_deg（後ろへの傾き、10〜30度）。
 - 形の選び方: 切ったペットボトル・缶・コップは cup（上が開いた円筒）、トイレットペーパーの芯は tube、切った牛乳パックやふたのない箱は tray、段ボールの板は box、中身の詰まった物だけ cylinder。容器を cylinder や box で塗りつぶさない。
 - 実物の大きさを使う: 500mlペットボトル 直径6.5×高さ20、2Lペットボトル 直径10.5×高さ30、1L牛乳パック 7×7×19.5、トイレットペーパーの芯 直径4×高さ11、350ml缶 直径6.6×高さ12.2。
-- 板の厚さ: 段ボール 0.5、牛乳パック 0.1、ペットボトルの壁 0.1（cup・tube の size.z）。
-- 置き方の計算: 地面に置く部品は position.y = size.y / 2。上に載せる部品は position.y = 下の部品の上面 + 自分の高さ / 2。回転していない cylinder・cup・tube は縦向き（高さがY方向）。横に寝かせるときは rotation.z = 90。
-- 箱を板で組むとき: 前後の板は外寸の幅いっぱい、左右の板は前後の板の内側にはまる長さ（外寸 − 板の厚さ×2）。角で板同士がめり込まないように、厚さの分だけ位置をずらす。
-- 中身（土・水・ペン・ひも）は容器の内側の寸法に収める（容器の外にはみ出さない）。
-- 部品同士は面で接するように置き、すき間（浮いている部品）も、大きなめり込みも作らない。
-- 出力前に各部品について確認する: 下端 (position.y − 高さ/2) が 0 か、下の部品の上端と一致しているか。隣の部品と体積の大部分が重なっていないか。
+- 板の厚さ: 段ボール 0.5、牛乳パック 0.1、ペットボトルの壁 0.1（cup・tube の size.z）。板(box)は size で向きを表す（立てた前面パネル: x=幅, y=高さ, z=厚さ0.5）。
+- 箱を板で組むとき: 底板の上に、前後の板を align front/back で載せ（幅は底板と同じ）、左右の板を align left/right で載せる（奥行きは 底板 − 板の厚さ×2 にして前後の板の内側にはめる）。
 - 色は実際の素材に近づける（段ボール #c69a6a、ペットボトル #cfe8f5、牛乳パック #f4f1ea、缶 #b9bec4、芯 #d9c4a3）。
+
+置き方の例（形・size・orientation・place だけ抜き出したもの）:
+- 段ボールの箱: base box 13×0.5×13 ground ／ front box 13×12×0.5 on base front ／ back box 13×12×0.5 on base back ／ left box 0.5×12×12 on base left ／ right box 0.5×12×12 on base right
+- 缶と芯のペン立て: can cup 6.6×12.2×0.1 ground ／ roll_l tube 4×11×0.1 beside can left ／ roll_r tube 4×11×0.1 beside can right ／ pens cylinder 1×14 inside can center
+- スマホスタンド: base box 10×0.5×9 ground ／ back box 10×12×0.5 on base back tilt_deg 20 ／ lip box 10×1.5×0.5 on base front ／ roll tube 4×11×0.1 orientation lying_x, on base center, offset z=1（手前に1cm）
+- 自動給水プランター: tank cup 10.5×12×0.1 ground ／ water cylinder 10×5 inside tank ／ top cone 10.5×12 upside_down on tank ／ herb sphere 7 on top center
 
 手順 (steps):
 - 7〜10手順。初めて作る人が、説明だけを見て迷わず完成できるように細分化する。1つの手順では1つのまとまった作業だけをする。
@@ -187,7 +199,7 @@ async function streamClaude(send: Send, content: Content) {
       betas: fast ? ["server-side-fallback-2026-07-01", "fast-mode-2026-02-01"] : ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       ...(fast ? { speed: "fast" as const } : {}),
-      output_config: { effort: EFFORT, format: betaZodOutputFormat(BlueprintSchema) },
+      output_config: { effort: EFFORT, format: betaZodOutputFormat(AIBlueprintSchema) },
       system: SYSTEM,
       messages: [{ role: "user", content }],
     });
@@ -239,21 +251,30 @@ async function streamClaude(send: Send, content: Content) {
   } catch {
     return send({ t: "e", error: "AIの出力を読み取れませんでした。もう一度お試しください。" });
   }
-  const result = BlueprintSchema.safeParse(parsed);
+  const result = AIBlueprintSchema.safeParse(parsed);
   if (!result.success) {
     return send({ t: "e", error: "AIの出力が不完全でした。もう一度お試しください。" });
   }
 
-  const blueprint = await polishGeometry(client, result.data, started);
-  send({ t: "final", blueprint, demo: false, ms: Date.now() - started });
+  // The AI says where parts go; work out the exact coordinates here.
+  const placed: Blueprint = { ...result.data, parts: resolveParts(result.data.parts) };
+  const { blueprint, quality } = await polishGeometry(client, placed, started);
+  send({ t: "final", blueprint, demo: false, ms: Date.now() - started, quality });
 }
+
+/** How clean the AI's model was, for logs and scripts/eval-models.mjs. */
+type Quality = { raw_issues: number; final_issues: number; repaired: boolean };
 
 /**
  * Check the model for overlaps / floating parts. If there are problems and
  * time left, ask for a quick coordinate-only repair; then always settle the
  * model onto the ground. Never throws: on any failure the original is used.
  */
-async function polishGeometry(client: Anthropic, bp: Blueprint, started: number): Promise<Blueprint> {
+async function polishGeometry(
+  client: Anthropic,
+  bp: Blueprint,
+  started: number,
+): Promise<{ blueprint: Blueprint; quality: Quality }> {
   let parts = bp.parts;
   // Floating parts alone don't need the AI: settle() drops them into place.
   const issues = findIssues(parts);
@@ -297,7 +318,7 @@ async function polishGeometry(client: Anthropic, bp: Blueprint, started: number)
 
   parts = settle(parts);
   console.log(`[transform] geometry: ${issues.length} issues before, ${findIssues(parts).length} after`);
-  return { ...bp, parts };
+  return { blueprint: { ...bp, parts }, quality: { raw_issues: issues.length, final_issues: findIssues(parts).length, repaired } };
 }
 
 /** Without an API key: replay the demo blueprint as a fake stream so the UI looks the same. */
