@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@/lib/products";
-import { HOUSEHOLD_TRASH, MAKE_REQUEST_KEY, toJpegBase64, type MakeRequest } from "@/lib/trash";
+import { HOUSEHOLD_TRASH, MAKE_REQUEST_KEY, MAKE_RESULT_KEY, toJpegBase64, type MakeRequest } from "@/lib/trash";
 
 type Phase = "idle" | "glitch" | "fall" | "reveal" | "ask" | "extra";
 
@@ -17,6 +17,7 @@ export default function ShopPage() {
   const [source, setSource] = useState<"dummyjson" | "yahoo">("dummyjson");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   const [target, setTarget] = useState<Product | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -55,16 +56,28 @@ export default function ShopPage() {
 
   function answer(yes: boolean) {
     const item = HOUSEHOLD_TRASH[qIndex];
-    const next = yes ? [...have, item.name] : have;
-    setHave(next);
+    const next = have.filter((n) => n !== item.name);
+    setHave(yes ? [...next, item.name] : next);
     if (qIndex + 1 < HOUSEHOLD_TRASH.length) setQIndex(qIndex + 1);
     else setPhase("extra");
+  }
+
+  function back() {
+    if (phase === "extra") {
+      setPhase("ask");
+      setQIndex(HOUSEHOLD_TRASH.length - 1);
+    } else if (qIndex > 0) setQIndex(qIndex - 1);
+    else setPhase("reveal");
   }
 
   async function pickPhoto(file?: File) {
     if (!file || !file.type.startsWith("image/")) return;
     setExtraError(null);
-    setPhoto(await toJpegBase64(file));
+    try {
+      setPhoto(await toJpegBase64(file));
+    } catch (e) {
+      setExtraError(e instanceof Error ? e.message : "写真を読み込めませんでした。");
+    }
   }
 
   function goMake() {
@@ -79,6 +92,7 @@ export default function ShopPage() {
       photo: photo ?? undefined,
     };
     try {
+      sessionStorage.removeItem(MAKE_RESULT_KEY);
       sessionStorage.setItem(MAKE_REQUEST_KEY, JSON.stringify(req));
     } catch {
       // Storage full or blocked: try again without the photo.
@@ -122,7 +136,24 @@ export default function ShopPage() {
       }
     }, 250);
     return () => clearTimeout(id);
-  }, [query, category]);
+  }, [query, category, reload]);
+
+  // Keyboard: → / Y = ある, ← / N = ない, Esc = leave.
+  useEffect(() => {
+    if (phase !== "ask" && phase !== "reveal" && phase !== "extra") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return reset();
+      if (e.target instanceof HTMLElement && e.target.closest("input, textarea")) return;
+      if (phase === "reveal" && e.key === "Enter") return setPhase("ask");
+      if (phase !== "ask") return;
+      const k = e.key.toLowerCase();
+      if (k === "arrowright" || k === "y") answer(true);
+      else if (k === "arrowleft" || k === "n") answer(false);
+      else if (k === "backspace") back();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   // The 化ける sequence: glitch → everything falls → reveal.
   function addToCart(p: Product) {
@@ -188,6 +219,15 @@ export default function ShopPage() {
               placeholder={source === "yahoo" ? "商品を検索（例：スマホスタンド）" : "Search (e.g. plant, rack, tray)"}
               className="h-10 w-full bg-transparent px-3 text-sm outline-none placeholder:text-neutral-400"
             />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                aria-label="検索をクリア"
+                className="shrink-0 rounded-full px-1 text-neutral-400 hover:text-neutral-700"
+              >
+                ×
+              </button>
+            )}
           </div>
           <div className="relative shrink-0 text-neutral-700" aria-label="カート">
             <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -231,7 +271,17 @@ export default function ShopPage() {
 
       {/* Grid */}
       <main className="mx-auto max-w-6xl px-4 py-6">
-        {error && <p className="py-20 text-center text-sm text-red-600">{error}</p>}
+        {error && (
+          <div className="py-20 text-center text-sm">
+            <p className="text-red-600">{error}</p>
+            <button
+              onClick={() => setReload((n) => n + 1)}
+              className="mt-4 rounded-full border border-neutral-300 bg-white px-5 py-2 text-neutral-700 hover:border-neutral-500"
+            >
+              再読み込み
+            </button>
+          </div>
+        )}
         {!error && !loading && products.length === 0 && (
           <p className="py-20 text-center text-sm text-neutral-500">該当する商品が見つかりませんでした。</p>
         )}
@@ -371,6 +421,12 @@ export default function ShopPage() {
                 ある
               </button>
             </div>
+            <div className="mt-8 flex items-center justify-between text-xs text-white/35">
+              <button onClick={back} className="underline-offset-4 hover:text-white/70 hover:underline">
+                ← 前の質問
+              </button>
+              <span className="hidden sm:inline">キーボード: ← ない ・ → ある</span>
+            </div>
           </div>
         </div>
       )}
@@ -434,9 +490,14 @@ export default function ShopPage() {
             >
               {photo || extra.trim() ? "化けさせる →" : "これで化けさせる →"}
             </button>
-            <button onClick={reset} className="mt-6 text-xs text-white/40 underline-offset-4 hover:underline">
-              やっぱり買う
-            </button>
+            <div className="mt-6 flex justify-center gap-6 text-xs text-white/40">
+              <button onClick={back} className="underline-offset-4 hover:underline">
+                ← 前の質問
+              </button>
+              <button onClick={reset} className="underline-offset-4 hover:underline">
+                やっぱり買う
+              </button>
+            </div>
           </div>
         </div>
       )}

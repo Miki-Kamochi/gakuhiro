@@ -16,15 +16,23 @@ export type MakeRequest = {
 };
 
 export const MAKE_REQUEST_KEY = "bakeru:request";
+/** The last generated blueprint, so a reload shows it again instead of paying for a new one. */
+export const MAKE_RESULT_KEY = "bakeru:result";
 
-/** Downscale to keep the upload small and fast. */
+/** Downscale to keep the upload small and fast. Throws a readable message for formats the browser cannot decode (e.g. HEIC). */
 export async function toJpegBase64(file: File, max = 1024): Promise<{ data: string; url: string }> {
-  const bitmap = await createImageBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error("この写真は読み込めませんでした。JPEGかPNGの写真を選んでください。");
+  }
   const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
   canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
   const url = canvas.toDataURL("image/jpeg", 0.85);
   return { data: url.split(",")[1], url };
 }

@@ -26,15 +26,26 @@ const SYSTEM = `あなたは「BAKERU（化ける）」というアップサイ�
 const MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 type MediaType = (typeof MEDIA_TYPES)[number];
 
+/** Generating a full blueprint can take a minute; don't let the platform cut it off. */
+export const maxDuration = 300;
+
+type Body = {
+  image?: string;
+  mediaType?: string;
+  problem?: string;
+  trash?: string[];
+  extra?: string;
+  want?: { name?: string; price?: number };
+};
+
 export async function POST(request: Request) {
-  const { image, mediaType, problem, trash, extra, want } = (await request.json()) as {
-    image?: string;
-    mediaType?: string;
-    problem?: string;
-    trash?: string[];
-    extra?: string;
-    want?: { name?: string; price?: number };
-  };
+  let body: Body;
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    return Response.json({ error: "リクエストの形式が正しくありません。" }, { status: 400 });
+  }
+  const { image, mediaType, problem, trash, extra, want } = body;
 
   const trashList = (Array.isArray(trash) ? trash : []).map((t) => String(t).slice(0, 50)).slice(0, 20);
   const extraText = extra?.trim().slice(0, 300) ?? "";
@@ -84,7 +95,7 @@ export async function POST(request: Request) {
     });
 
     if (response.stop_reason === "refusal" || !response.parsed_output) {
-      return Response.json({ error: "この写真からは作品を考えられませんでした。別の写真を試してください。" }, { status: 422 });
+      return Response.json({ error: "この組み合わせからは作品を考えられませんでした。ゴミを変えるか、別の写真を試してください。" }, { status: 422 });
     }
 
     return Response.json({ blueprint: response.parsed_output, demo: false });
@@ -96,8 +107,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "リクエストが多すぎます。少し待ってから再度お試しください。" }, { status: 429 });
     }
     if (error instanceof Anthropic.APIError) {
-      return Response.json({ error: `AIエラー ${error.status}: ${error.message}` }, { status: 502 });
+      console.error("[transform] API error", error.status, error.message);
+      const busy = error.status === 529 || error.status === 503;
+      return Response.json(
+        { error: busy ? "AIが混み合っています。少し待ってからもう一度お試しください。" : "AIとの通信に失敗しました。もう一度お試しください。" },
+        { status: 502 },
+      );
     }
-    throw error;
+    console.error("[transform] unexpected error", error);
+    return Response.json({ error: "予期しないエラーが発生しました。もう一度お試しください。" }, { status: 500 });
   }
 }

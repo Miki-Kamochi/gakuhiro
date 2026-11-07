@@ -11,7 +11,7 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-geist-sans), var(--font-noto-jp), "Hiragino Sans", sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
@@ -22,7 +22,10 @@ html {
 body {
   background: var(--color-blush);
   color: var(--color-espresso);
-  font-family: var(--font-geist-sans), "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-family: var(--font-geist-sans), var(--font-noto-jp), "Hiragino Sans", "Yu Gothic", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  /* Break Japanese at phrase boundaries, not mid-word (Chrome; ignored elsewhere). */
+  word-break: auto-phrase;
 }
 
 ::selection {
@@ -85,4 +88,28 @@ body {
   to {
     top: 100%;
   }
+}
+
+/* Gentle shimmer for loading placeholders */
+.shimmer {
+  background: linear-gradient(100deg, rgba(230, 200, 183, 0.25) 30%, rgba(255, 250, 248, 0.9) 50%, rgba(230, 200, 183, 0.25) 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-amber);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .bake-glitch { animation: bake-fade 0.4s ease-out both; }
+  .bake-rise { animation: bake-fade 0.4s ease-out both; }
+  .scanline, .shimmer { animation: none; }
 }

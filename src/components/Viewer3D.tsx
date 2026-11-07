@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Part } from "@/lib/blueprint";
@@ -55,7 +55,8 @@ export type ViewerProps = {
  */
 export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }: ViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const state = useRef({ step, exploded, selectedId, stepStart: 0 });
+  const state = useRef({ step, exploded, selectedId, stepStart: -1 });
+  const [failed, setFailed] = useState(false);
   const onSelectRef = useRef(onSelect);
 
   useEffect(() => {
@@ -74,15 +75,29 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
     const mount = mountRef.current;
     if (!mount) return;
 
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      // No WebGL (old device, disabled GPU): the step list still works without the model.
+      const id = setTimeout(() => setFailed(true));
+      return () => clearTimeout(id);
+    }
+    if (state.current.stepStart < 0) state.current.stepStart = performance.now() / 1000;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 2000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     mount.appendChild(renderer.domElement);
 
     scene.add(new THREE.HemisphereLight(0xfff6f2, 0xe6c8b7, 1.1));
     const key = new THREE.DirectionalLight(0xffffff, 1.4);
     key.position.set(30, 50, 40);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.radius = 6;
+    key.shadow.bias = -0.0005;
     scene.add(key);
     const fill = new THREE.DirectionalLight(0xffe0cc, 0.5);
     fill.position.set(-40, 20, -30);
@@ -101,6 +116,7 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
       mesh.position.copy(home);
       mesh.rotation.set(part.rotation.x * DEG, part.rotation.y * DEG, part.rotation.z * DEG);
       mesh.userData.id = part.id;
+      mesh.castShadow = true;
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geometry, 25),
         new THREE.LineBasicMaterial({ color: ESPRESSO, transparent: true }),
@@ -121,6 +137,24 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
       if (dir.lengthSq() < 0.01 * radius * radius) dir.set(0, 1, 0);
       b.away.copy(dir.normalize().add(new THREE.Vector3(0, 0.2, 0)).normalize());
     }
+
+    // Soft contact shadow under the model.
+    const shadowCam = key.shadow.camera;
+    shadowCam.left = shadowCam.bottom = -radius * 2;
+    shadowCam.right = shadowCam.top = radius * 2;
+    shadowCam.near = 0.1;
+    shadowCam.far = radius * 12;
+    key.position.set(center.x + radius * 1.5, center.y + radius * 4, center.z + radius * 2);
+    key.target.position.copy(center);
+    scene.add(key.target);
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(radius * 8, radius * 8),
+      new THREE.ShadowMaterial({ color: 0x5a2e1a, opacity: 0.16 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(center.x, box.min.y + 0.01, center.z);
+    ground.receiveShadow = true;
+    scene.add(ground);
 
     const grid = new THREE.GridHelper(radius * 6, 24, 0xc3955b, 0xe6c8b7);
     grid.position.y = box.min.y;
@@ -166,6 +200,15 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
     const observer = new ResizeObserver(resize);
     observer.observe(mount);
 
+    // Stop rendering while the viewer is scrolled out of view.
+    let visible = true;
+    const io = new IntersectionObserver(([entry]) => {
+      const was = visible;
+      visible = entry.isIntersecting;
+      if (visible && !was) frame = requestAnimationFrame(tick);
+    });
+    io.observe(mount);
+
     let frame = 0;
     let explode = 0;
     const tmp = new THREE.Vector3();
@@ -200,6 +243,7 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
           line.opacity = dimmed ? 0.08 : current || selected ? 0.9 : 0.25;
         }
         mat.depthWrite = mat.opacity === 1;
+        b.mesh.castShadow = !future;
 
         if (selected) mat.emissive.copy(EMERALD).multiplyScalar(0.6 + 0.4 * pulse);
         else if (current) mat.emissive.copy(AMBER).multiplyScalar(0.15 + 0.2 * pulse * assemble);
@@ -208,13 +252,14 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
       controls.autoRotate = sel === null;
       controls.update();
       renderer.render(scene, camera);
-      frame = requestAnimationFrame(tick);
+      if (visible) frame = requestAnimationFrame(tick);
     };
     tick();
 
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      io.disconnect();
       controls.dispose();
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
@@ -224,6 +269,8 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
         edges.geometry.dispose();
         (edges.material as THREE.Material).dispose();
       }
+      ground.geometry.dispose();
+      (ground.material as THREE.Material).dispose();
       grid.geometry.dispose();
       (grid.material as THREE.Material).dispose();
       renderer.dispose();
@@ -231,5 +278,12 @@ export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }
     };
   }, [parts]);
 
+  if (failed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center px-8 text-center text-sm text-espresso/55">
+        この端末では3D表示を使えません。右側の手順と部品リストで作り方を確認できます。
+      </div>
+    );
+  }
   return <div ref={mountRef} className="h-full w-full cursor-grab active:cursor-grabbing" />;
 }

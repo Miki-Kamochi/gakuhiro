@@ -1,9 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Blueprint, Part } from "@/lib/blueprint";
-import { MAKE_REQUEST_KEY, toJpegBase64, type MakeRequest } from "@/lib/trash";
+import { MAKE_REQUEST_KEY, MAKE_RESULT_KEY, toJpegBase64, type MakeRequest } from "@/lib/trash";
 
 const Viewer3D = dynamic(() => import("@/components/Viewer3D"), { ssr: false });
 
@@ -31,6 +32,8 @@ export default function MakePage() {
   const [category, setCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingLine, setLoadingLine] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ blueprint: Blueprint; demo: boolean } | null>(null);
   const [step, setStep] = useState(1);
@@ -44,34 +47,51 @@ export default function MakePage() {
   // Generation starts straight away — no form to fill in.
   const [request, setRequest] = useState<MakeRequest | null>(null);
   const wanted = request?.want ?? null;
+  // A reload shows the last result again instead of paying for a new generation.
   useEffect(() => {
     let req: MakeRequest | null = null;
+    let cached: { blueprint: Blueprint; demo: boolean } | null = null;
     try {
       const raw = sessionStorage.getItem(MAKE_REQUEST_KEY);
       if (raw) req = JSON.parse(raw) as MakeRequest;
+      const saved = sessionStorage.getItem(MAKE_RESULT_KEY);
+      if (saved) cached = JSON.parse(saved) as { blueprint: Blueprint; demo: boolean };
     } catch {
       /* storage unavailable: fall back to the manual form */
     }
-    if (!req) return;
+    if (!req && !cached) return;
     // Defer so the server-rendered HTML matches on hydration.
     const id = setTimeout(() => {
-      setRequest(req);
-      if (req.photo) setPhoto(req.photo);
-      run(req);
+      if (req) {
+        setRequest(req);
+        if (req.photo) setPhoto(req.photo);
+      }
+      if (cached?.blueprint) setResult(cached);
+      else if (req) run(req);
     });
     return () => clearTimeout(id);
   }, []);
 
+  // Loading copy walks forward through the stages and stops on the last one.
   useEffect(() => {
     if (!loading) return;
-    const id = setInterval(() => setLoadingLine((i) => (i + 1) % LOADING_LINES.length), 1600);
+    const start = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - start) / 1000;
+      setElapsed(Math.floor(s));
+      setLoadingLine(Math.min(LOADING_LINES.length - 1, Math.floor(s / 7)));
+    }, 500);
     return () => clearInterval(id);
   }, [loading]);
 
   async function pick(file?: File) {
     if (!file || !file.type.startsWith("image/")) return;
     setError(null);
-    setPhoto(await toJpegBase64(file));
+    try {
+      setPhoto(await toJpegBase64(file));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "写真を読み込めませんでした。");
+    }
   }
 
   /** Manual form (direct visit to /make). */
@@ -83,6 +103,7 @@ export default function MakePage() {
   async function run(req: MakeRequest, problemText = "") {
     setLoading(true);
     setLoadingLine(0);
+    setElapsed(0);
     setError(null);
     try {
       const res = await fetch("/api/transform", {
@@ -100,6 +121,11 @@ export default function MakePage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "エラーが発生しました。");
       setResult(json);
+      try {
+        sessionStorage.setItem(MAKE_RESULT_KEY, JSON.stringify(json));
+      } catch {
+        /* storage full: the result just won't survive a reload */
+      }
       setStep(1);
       setExploded(false);
       setSelectedId(null);
@@ -124,8 +150,55 @@ export default function MakePage() {
   }, [bp]);
 
   function goToStep(n: number) {
-    setStep(n);
+    setStep(Math.max(1, Math.min(total + 1, n)));
     setSelectedId(null);
+  }
+
+  // ← / → step through the build.
+  useEffect(() => {
+    if (!bp) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest("input, textarea")) return;
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      e.preventDefault();
+      setSelectedId(null);
+      setStep((s) => Math.max(1, Math.min(total + 1, s + (e.key === "ArrowRight" ? 1 : -1))));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [bp, total]);
+
+  function regenerate() {
+    if (request) run(request);
+    else if (photo) run({ trash: [], extra: "", photo }, problem);
+  }
+
+  async function copyInstructions() {
+    if (!bp) return;
+    const text = [
+      bp.title,
+      bp.tagline,
+      "",
+      `難易度 ${bp.difficulty}/5 ・ 約${bp.time_minutes}分`,
+      `道具: ${bp.tools.join("、")}`,
+      "",
+      "【部品】",
+      ...bp.parts.map((p) => `・${p.name}（${p.source}）${p.dimensions}`),
+      "",
+      "【作り方】",
+      ...bp.steps.flatMap((s, i) =>
+        [`${i + 1}. ${s.title}`, ...s.actions.map((a) => `   - ${a}`), s.caution ? `   ⚠ ${s.caution}` : ""].filter(Boolean),
+      ),
+      "",
+      "BAKERU — いらないものが、使えるものに化ける。",
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked: nothing useful to show */
+    }
   }
 
   function selectPart(p: Part) {
@@ -141,12 +214,13 @@ export default function MakePage() {
       {/* Nav */}
       <header className="sticky top-0 z-20 border-b border-champagne/70 bg-blush/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
-          <span className="text-sm font-medium tracking-[0.35em]">
+          <Link href="/" className="text-sm font-medium tracking-[0.35em]">
             BAKERU <span className="ml-1 tracking-[0.2em] text-amber">化ける</span>
-          </span>
-          <nav className="flex gap-8 text-xs tracking-[0.2em] text-espresso/60">
+          </Link>
+          <nav className="flex gap-6 text-xs tracking-[0.2em] text-espresso/60 sm:gap-8">
             <a href="#input" className="transition hover:text-espresso">入力</a>
             <a href="#output" className="transition hover:text-espresso">結果</a>
+            <Link href="/" className="transition hover:text-espresso">ショップ</Link>
           </nav>
         </div>
       </header>
@@ -204,7 +278,8 @@ export default function MakePage() {
                 {loading ? (
                   <>
                     <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-champagne border-t-amber" />
-                    <span className="text-base">{LOADING_LINES[loadingLine]}…</span>
+                    <span className="flex-1 text-base">{LOADING_LINES[loadingLine]}…</span>
+                    <span className="font-mono text-xs text-espresso/45">{elapsed}秒</span>
                   </>
                 ) : error ? (
                   <>
@@ -330,8 +405,29 @@ export default function MakePage() {
             <h2 className="text-2xl font-light tracking-tight sm:text-3xl">変身結果</h2>
           </div>
 
-          {!bp ? (
-            <div className="flex aspect-[21/9] items-center justify-center rounded-2xl border border-dashed border-cognac/50 text-sm text-espresso/45">
+          {loading ? (
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]" aria-busy="true">
+              <div className="viewer-bg relative flex h-[50vh] min-h-[360px] flex-col items-center justify-center overflow-hidden rounded-2xl border border-champagne px-6 text-center">
+                <div className="scanline pointer-events-none absolute inset-x-0 h-24" />
+                <span className="h-10 w-10 animate-spin rounded-full border-2 border-champagne border-t-amber" />
+                <p className="mt-6 text-lg font-light">{LOADING_LINES[loadingLine]}…</p>
+                <p className="mt-2 text-xs text-espresso/50">
+                  ふつう30〜60秒ほどかかります ・ <span className="font-mono">{elapsed}秒</span>
+                </p>
+                <div className="mt-6 flex gap-1.5">
+                  {LOADING_LINES.map((l, i) => (
+                    <span key={l} className={`h-1 w-8 rounded-full transition ${i <= loadingLine ? "bg-amber" : "bg-espresso/10"}`} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-4">
+                <div className="shimmer h-28 rounded-2xl" />
+                <div className="shimmer h-56 rounded-2xl" />
+                <div className="shimmer h-40 rounded-2xl" />
+              </div>
+            </div>
+          ) : !bp ? (
+            <div className="flex aspect-[21/9] items-center justify-center rounded-2xl border border-dashed border-cognac/50 px-6 text-center text-sm text-espresso/45">
               ここに3Dの設計図と作り方が表示されます
             </div>
           ) : (
@@ -355,11 +451,33 @@ export default function MakePage() {
                   </div>
                   <h3 className="text-3xl font-light tracking-tight sm:text-5xl">{bp.title}</h3>
                   <p className="mt-4 max-w-2xl text-lg font-light text-espresso/70">{bp.tagline}</p>
+                  <div className="mt-6 flex flex-wrap gap-2 text-sm">
+                    <button
+                      onClick={copyInstructions}
+                      className="rounded-full border border-espresso/25 bg-white/60 px-4 py-2 transition hover:border-espresso"
+                    >
+                      {copied ? "コピーしました ✓" : "作り方をコピー"}
+                    </button>
+                    {(request || photo) && (
+                      <button
+                        onClick={regenerate}
+                        className="rounded-full border border-espresso/25 bg-white/60 px-4 py-2 transition hover:border-espresso"
+                      >
+                        別の案を出す ↻
+                      </button>
+                    )}
+                    <Link
+                      href="/"
+                      className="rounded-full border border-espresso/25 bg-white/60 px-4 py-2 transition hover:border-espresso"
+                    >
+                      ショップに戻る
+                    </Link>
+                  </div>
                 </div>
                 <dl className="grid grid-cols-3 overflow-hidden rounded-2xl border border-champagne bg-white/60">
-                  <Stat label="難易度" value={`${bp.difficulty}/5`} />
-                  <Stat label="所要時間" value={`${bp.time_minutes}分`} />
-                  <Stat label="CO₂削減" value={`${bp.co2_saved_g}g`} />
+                  <Stat label="難易度" value={`${Math.min(5, Math.max(1, Math.round(bp.difficulty)))}/5`} />
+                  <Stat label="所要時間" value={`${Math.round(bp.time_minutes)}分`} />
+                  <Stat label="CO₂削減" value={`${Math.round(bp.co2_saved_g).toLocaleString("ja-JP")}g`} />
                 </dl>
               </div>
 
@@ -426,7 +544,7 @@ export default function MakePage() {
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-espresso/50">
-                    ドラッグで回転・スクロールで拡大。部品をクリックすると作り方が表示されます。
+                    ドラッグで回転・スクロールで拡大・← → キーで手順を移動。部品をクリックすると作り方が表示されます。
                   </p>
                 </div>
 

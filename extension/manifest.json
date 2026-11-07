@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "BAKERU 化けるボタン",
+  "version": "1.0.0",
+  "description": "買う前に、ゴミで作れるか見てみる。ショップの商品ページに「化ける」ボタンを表示します。",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.amazon.co.jp/*",
+        "https://www.amazon.com/*",
+        "https://www.ebay.com/*",
+        "https://www.ebay.co.uk/*",
+        "https://item.rakuten.co.jp/*",
+        "https://store.shopping.yahoo.co.jp/*",
+        "https://paypaymall.yahoo.co.jp/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
