@@ -6,6 +6,9 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Part } from "@/lib/blueprint";
 
 const DEG = Math.PI / 180;
+const ESPRESSO = 0x261311;
+const EMERALD = new THREE.Color("#1c3934");
+const AMBER = new THREE.Color("#ba6a36");
 
 function geometryFor(part: Part): THREE.BufferGeometry {
   const { x, y, z } = part.size;
@@ -25,72 +28,133 @@ function geometryFor(part: Part): THREE.BufferGeometry {
   }
 }
 
-type Built = { part: Part; mesh: THREE.Mesh; edges: THREE.LineSegments };
+const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+type Built = {
+  part: Part;
+  mesh: THREE.Mesh;
+  edges: THREE.LineSegments;
+  home: THREE.Vector3;
+  /** Direction the part flies in from (away from the model's center). */
+  away: THREE.Vector3;
+};
+
+export type ViewerProps = {
+  parts: Part[];
+  /** 1..N = building step N, N+1 = finished. */
+  step: number;
+  exploded: boolean;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+};
 
 /**
- * Renders the AI's primitive-based blueprint. Parts from finished steps are solid,
- * parts from the current step glow, and future parts are faint wireframe ghosts.
+ * Parts from finished steps are solid. Parts from the current step fly in from
+ * outside and snap into place on a loop, so you can see how they fit together.
+ * Future parts are faint ghosts. "exploded" spreads every part apart.
  */
-export default function Viewer3D({ parts, step }: { parts: Part[]; step: number }) {
+export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }: ViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const builtRef = useRef<Built[]>([]);
-  const stepRef = useRef(step);
+  const state = useRef({ step, exploded, selectedId, stepStart: 0 });
+  const onSelectRef = useRef(onSelect);
+
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    const s = state.current;
+    if (s.step !== step) s.stepStart = performance.now() / 1000;
+    s.step = step;
+    s.exploded = exploded;
+    s.selectedId = selectedId;
+  }, [step, exploded, selectedId]);
 
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 2000);
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    scene.add(new THREE.HemisphereLight(0xfff6f2, 0xe6c8b7, 1.1));
+    const key = new THREE.DirectionalLight(0xffffff, 1.4);
     key.position.set(30, 50, 40);
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x9fb4ff, 0.8);
-    rim.position.set(-40, 20, -30);
-    scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xffe0cc, 0.5);
+    fill.position.set(-40, 20, -30);
+    scene.add(fill);
 
     const group = new THREE.Group();
     scene.add(group);
 
-    builtRef.current = parts.map((part) => {
+    const meshes: Built[] = parts.map((part) => {
       const geometry = geometryFor(part);
       const mesh = new THREE.Mesh(
         geometry,
-        new THREE.MeshStandardMaterial({ color: part.color, roughness: 0.55, metalness: 0.05, transparent: true }),
+        new THREE.MeshStandardMaterial({ color: part.color, roughness: 0.6, metalness: 0.02, transparent: true }),
       );
-      mesh.position.set(part.position.x, part.position.y, part.position.z);
+      const home = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
+      mesh.position.copy(home);
       mesh.rotation.set(part.rotation.x * DEG, part.rotation.y * DEG, part.rotation.z * DEG);
+      mesh.userData.id = part.id;
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geometry, 25),
-        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true }),
+        new THREE.LineBasicMaterial({ color: ESPRESSO, transparent: true }),
       );
       mesh.add(edges);
       group.add(mesh);
-      return { part, mesh, edges };
+      return { part, mesh, edges, home, away: new THREE.Vector3() };
     });
 
-    // Fit the camera to the model.
+    // Fit camera and work out fly-in directions.
     const box = new THREE.Box3().setFromObject(group);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 1);
+    for (const b of meshes) {
+      const dir = b.home.clone().sub(center);
+      dir.y *= 0.6;
+      if (dir.lengthSq() < 0.01 * radius * radius) dir.set(0, 1, 0);
+      b.away.copy(dir.normalize().add(new THREE.Vector3(0, 0.2, 0)).normalize());
+    }
 
-    const grid = new THREE.GridHelper(radius * 6, 24, 0x3a3a3a, 0x1c1c1c);
+    const grid = new THREE.GridHelper(radius * 6, 24, 0xc3955b, 0xe6c8b7);
     grid.position.y = box.min.y;
+    (grid.material as THREE.Material).transparent = true;
+    (grid.material as THREE.Material).opacity = 0.7;
     scene.add(grid);
 
-    camera.position.set(center.x + radius * 2.2, center.y + radius * 1.3, center.z + radius * 2.6);
+    camera.position.set(center.x + radius * 2.7, center.y + radius * 1.5, center.z + radius * 3.2);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.copy(center);
     controls.enableDamping = true;
     controls.autoRotate = true;
-    controls.autoRotateSpeed = 1.2;
+    controls.autoRotateSpeed = 0.9;
     controls.update();
+
+    // Click (not drag) to select a part.
+    const raycaster = new THREE.Raycaster();
+    let down = { x: 0, y: 0 };
+    const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
+    const onUp = (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      const visible = meshes.filter((b) => b.part.step <= state.current.step).map((b) => b.mesh);
+      const hit = raycaster.intersectObjects(visible, false)[0];
+      const id = (hit?.object.userData.id as string | undefined) ?? null;
+      onSelectRef.current(id === state.current.selectedId ? null : id);
+    };
+    renderer.domElement.addEventListener("pointerdown", onDown);
+    renderer.domElement.addEventListener("pointerup", onUp);
 
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = mount;
@@ -103,32 +167,45 @@ export default function Viewer3D({ parts, step }: { parts: Part[]; step: number 
     observer.observe(mount);
 
     let frame = 0;
-    const clock = new THREE.Clock();
+    let explode = 0;
+    const tmp = new THREE.Vector3();
     const tick = () => {
-      const t = clock.getElapsedTime();
-      for (const { part, mesh, edges } of builtRef.current) {
-        const mat = mesh.material as THREE.MeshStandardMaterial;
-        const line = edges.material as THREE.LineBasicMaterial;
-        const s = stepRef.current;
-        if (part.step < s) {
-          mat.opacity = 1;
-          mat.emissive.setHex(0x000000);
-          line.opacity = 0.18;
-          mat.wireframe = false;
-        } else if (part.step === s) {
-          const pulse = 0.5 + 0.5 * Math.sin(t * 3);
-          mat.opacity = 1;
-          mat.wireframe = false;
-          mat.emissive.set(part.color).multiplyScalar(0.25 + 0.25 * pulse);
-          line.opacity = 0.6 + 0.4 * pulse;
-        } else {
-          mat.opacity = 0.04;
-          mat.wireframe = false;
-          mat.emissive.setHex(0x000000);
+      const now = performance.now() / 1000;
+      const { step: s, exploded: ex, selectedId: sel, stepStart } = state.current;
+      explode += ((ex ? 1 : 0) - explode) * 0.08;
+
+      // Assembly loop for the current step: wait, fly in, hold.
+      const cycle = 3.4;
+      const t = (now - stepStart) % cycle;
+      const assemble = ease(THREE.MathUtils.clamp((t - 0.5) / 1.4, 0, 1));
+      const pulse = 0.5 + 0.5 * Math.sin(now * 4);
+
+      for (const b of meshes) {
+        const mat = b.mesh.material as THREE.MeshStandardMaterial;
+        const line = b.edges.material as THREE.LineBasicMaterial;
+        const current = b.part.step === s;
+        const future = b.part.step > s;
+        const selected = sel === b.part.id;
+        const dimmed = sel !== null && !selected;
+
+        let fly = explode * radius * 0.4;
+        if (current && !ex) fly += (1 - assemble) * radius * 1.1;
+        b.mesh.position.copy(tmp.copy(b.away).multiplyScalar(fly).add(b.home));
+
+        if (future) {
+          mat.opacity = 0.05;
           line.opacity = 0.12;
+        } else {
+          mat.opacity = dimmed ? 0.18 : 1;
+          line.opacity = dimmed ? 0.08 : current || selected ? 0.9 : 0.25;
         }
-        mat.depthWrite = part.step <= s;
+        mat.depthWrite = mat.opacity === 1;
+
+        if (selected) mat.emissive.copy(EMERALD).multiplyScalar(0.6 + 0.4 * pulse);
+        else if (current) mat.emissive.copy(AMBER).multiplyScalar(0.15 + 0.2 * pulse * assemble);
+        else mat.emissive.setHex(0x000000);
       }
+      controls.autoRotate = sel === null;
       controls.update();
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
@@ -139,20 +216,20 @@ export default function Viewer3D({ parts, step }: { parts: Part[]; step: number 
       cancelAnimationFrame(frame);
       observer.disconnect();
       controls.dispose();
-      for (const { mesh, edges } of builtRef.current) {
+      renderer.domElement.removeEventListener("pointerdown", onDown);
+      renderer.domElement.removeEventListener("pointerup", onUp);
+      for (const { mesh, edges } of meshes) {
         mesh.geometry.dispose();
         (mesh.material as THREE.Material).dispose();
         edges.geometry.dispose();
         (edges.material as THREE.Material).dispose();
       }
+      grid.geometry.dispose();
+      (grid.material as THREE.Material).dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
   }, [parts]);
-
-  useEffect(() => {
-    stepRef.current = step;
-  }, [step]);
 
   return <div ref={mountRef} className="h-full w-full cursor-grab active:cursor-grabbing" />;
 }

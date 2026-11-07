@@ -1,42 +1,47 @@
 @import "tailwindcss";
 
-/* Monochrome palette: true black, near-black panels, white and greys. */
-:root {
-  --background: #000000;
-  --foreground: #ffffff;
+/* Palette: Blush / Champagne / Cognac / Amber / Emerald / Espresso */
+@theme {
+  --color-blush: #f9edf0;
+  --color-champagne: #e6c8b7;
+  --color-cognac: #c3955b;
+  --color-amber: #ba6a36;
+  --color-emerald: #1c3934;
+  --color-espresso: #261311;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 html {
   scroll-behavior: smooth;
-  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-blush);
+  color: var(--color-espresso);
   font-family: var(--font-geist-sans), "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
 
 ::selection {
-  background: #ffffff;
-  color: #000000;
+  background: var(--color-amber);
+  color: var(--color-blush);
 }
 
-.hero-glow {
+.page-glow {
   background:
-    radial-gradient(60% 50% at 75% 30%, rgba(255, 255, 255, 0.09), transparent 70%),
-    radial-gradient(40% 40% at 20% 80%, rgba(140, 160, 255, 0.06), transparent 70%);
+    radial-gradient(50% 40% at 85% 0%, rgba(230, 200, 183, 0.9), transparent 70%),
+    radial-gradient(40% 30% at 0% 20%, rgba(195, 149, 91, 0.18), transparent 70%);
+}
+
+.viewer-bg {
+  background: radial-gradient(ellipse at 50% 40%, #fffaf8 0%, #f6e4dc 55%, #ecd3c6 100%);
 }
 
 .scanline {
-  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.25), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(186, 106, 54, 0.35), transparent);
   animation: scan 1.8s ease-in-out infinite;
 }
 
