@@ -1,43 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { useEffect, useRef, useState } from "react";
 import type { Part } from "@/lib/blueprint";
-
-const DEG = Math.PI / 180;
-const ESPRESSO = 0x261311;
-const EMERALD = new THREE.Color("#1c3934");
-const AMBER = new THREE.Color("#ba6a36");
-
-function geometryFor(part: Part): THREE.BufferGeometry {
-  const { x, y, z } = part.size;
-  switch (part.shape) {
-    case "box":
-      return new THREE.BoxGeometry(x, y, z);
-    case "cylinder":
-      return new THREE.CylinderGeometry(x / 2, x / 2, y, 48);
-    case "cone":
-      return new THREE.ConeGeometry(x / 2, y, 48);
-    case "sphere":
-      return new THREE.SphereGeometry(x / 2, 40, 24);
-    case "torus": {
-      const tube = Math.max(y / 2, 0.1);
-      return new THREE.TorusGeometry(Math.max(x / 2 - tube, tube), tube, 16, 64);
-    }
-  }
-}
-
-const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-
-type Built = {
-  part: Part;
-  mesh: THREE.Mesh;
-  edges: THREE.LineSegments;
-  home: THREE.Vector3;
-  /** Direction the part flies in from (away from the model's center). */
-  away: THREE.Vector3;
-};
+import { ViewerEngine, type ViewName } from "./viewer/engine";
 
 export type ViewerProps = {
   parts: Part[];
@@ -46,190 +11,170 @@ export type ViewerProps = {
   exploded: boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /**
+   * The AI is still streaming parts in. Every part is shown solid and each new
+   * part pops in where it belongs; the camera re-frames as the model grows.
+   */
+  building?: boolean;
+  /** Show the view buttons / hints overlay. Default true. */
+  controls?: boolean;
 };
 
+const VIEW_BUTTONS: { view: ViewName; label: string; title: string }[] = [
+  { view: "front", label: "正面", title: "正面から見る" },
+  { view: "side", label: "横", title: "横から見る" },
+  { view: "top", label: "上", title: "上から見る" },
+  { view: "iso", label: "斜め", title: "斜めから見る" },
+];
+
+/** Tiny isometric cube with the face you'll be looking at highlighted. */
+function CubeIcon({ view }: { view: ViewName }) {
+  const on = "rgba(255,255,255,0.95)";
+  const off = "rgba(255,255,255,0.14)";
+  const top = view === "top" || view === "iso" ? on : off;
+  const front = view === "front" || view === "iso" ? on : off;
+  const side = view === "side" || view === "iso" ? on : off;
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="block">
+      <g stroke="rgba(255,255,255,0.7)" strokeWidth="1" strokeLinejoin="round">
+        <path d="M12 3 L20 7.5 L12 12 L4 7.5 Z" fill={top} fillOpacity={view === "iso" ? 0.55 : 1} />
+        <path d="M4 7.5 L12 12 L12 21 L4 16.5 Z" fill={front} fillOpacity={view === "iso" ? 0.85 : 1} />
+        <path d="M12 12 L20 7.5 L20 16.5 L12 21 Z" fill={side} fillOpacity={view === "iso" ? 0.3 : 1} />
+      </g>
+    </svg>
+  );
+}
+
 /**
- * Parts from finished steps are solid. Parts from the current step fly in from
- * outside and snap into place on a loop, so you can see how they fit together.
- * Future parts are faint ghosts. "exploded" spreads every part apart.
+ * Tinkercad-style 3D viewer on a dark cutting-mat workplane.
+ *
+ * - Parts from finished steps are solid. Parts of the current step fly in along
+ *   a dashed guide to a dashed "goes here" outline and snap into place, on a loop.
+ *   Future parts are faint ghosts. Labels show the current step's parts.
+ * - Click a part to select it: it gets a white outline and width / height /
+ *   depth callouts in cm. Hover shows its name.
+ * - `exploded` spreads every part apart and labels them.
+ * - `building`: parts stream in and pop into place without rebuilding the scene.
  */
-export default function Viewer3D({ parts, step, exploded, selectedId, onSelect }: ViewerProps) {
+export default function Viewer3D({
+  parts,
+  step,
+  exploded,
+  selectedId,
+  onSelect,
+  building = false,
+  controls = true,
+}: ViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const state = useRef({ step, exploded, selectedId, stepStart: 0 });
+  const engineRef = useRef<ViewerEngine | null>(null);
   const onSelectRef = useRef(onSelect);
+  const [view, setView] = useState<ViewName | null>("iso");
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
 
   useEffect(() => {
-    const s = state.current;
-    if (s.step !== step) s.stepStart = performance.now() / 1000;
-    s.step = step;
-    s.exploded = exploded;
-    s.selectedId = selectedId;
-  }, [step, exploded, selectedId]);
-
-  useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 2000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    mount.appendChild(renderer.domElement);
-
-    scene.add(new THREE.HemisphereLight(0xfff6f2, 0xe6c8b7, 1.1));
-    const key = new THREE.DirectionalLight(0xffffff, 1.4);
-    key.position.set(30, 50, 40);
-    scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffe0cc, 0.5);
-    fill.position.set(-40, 20, -30);
-    scene.add(fill);
-
-    const group = new THREE.Group();
-    scene.add(group);
-
-    const meshes: Built[] = parts.map((part) => {
-      const geometry = geometryFor(part);
-      const mesh = new THREE.Mesh(
-        geometry,
-        new THREE.MeshStandardMaterial({ color: part.color, roughness: 0.6, metalness: 0.02, transparent: true }),
-      );
-      const home = new THREE.Vector3(part.position.x, part.position.y, part.position.z);
-      mesh.position.copy(home);
-      mesh.rotation.set(part.rotation.x * DEG, part.rotation.y * DEG, part.rotation.z * DEG);
-      mesh.userData.id = part.id;
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geometry, 25),
-        new THREE.LineBasicMaterial({ color: ESPRESSO, transparent: true }),
-      );
-      mesh.add(edges);
-      group.add(mesh);
-      return { part, mesh, edges, home, away: new THREE.Vector3() };
+    const engine = new ViewerEngine(mount, {
+      onSelect: (id) => onSelectRef.current(id),
+      onInteract: () => {
+        setView(null);
+        setTouched(true);
+      },
     });
-
-    // Fit camera and work out fly-in directions.
-    const box = new THREE.Box3().setFromObject(group);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(size.length() / 2, 1);
-    for (const b of meshes) {
-      const dir = b.home.clone().sub(center);
-      dir.y *= 0.6;
-      if (dir.lengthSq() < 0.01 * radius * radius) dir.set(0, 1, 0);
-      b.away.copy(dir.normalize().add(new THREE.Vector3(0, 0.2, 0)).normalize());
-    }
-
-    const grid = new THREE.GridHelper(radius * 6, 24, 0xc3955b, 0xe6c8b7);
-    grid.position.y = box.min.y;
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.7;
-    scene.add(grid);
-
-    camera.position.set(center.x + radius * 2.7, center.y + radius * 1.5, center.z + radius * 3.2);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(center);
-    controls.enableDamping = true;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.9;
-    controls.update();
-
-    // Click (not drag) to select a part.
-    const raycaster = new THREE.Raycaster();
-    let down = { x: 0, y: 0 };
-    const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY });
-    const onUp = (e: PointerEvent) => {
-      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(ndc, camera);
-      const visible = meshes.filter((b) => b.part.step <= state.current.step).map((b) => b.mesh);
-      const hit = raycaster.intersectObjects(visible, false)[0];
-      const id = (hit?.object.userData.id as string | undefined) ?? null;
-      onSelectRef.current(id === state.current.selectedId ? null : id);
-    };
-    renderer.domElement.addEventListener("pointerdown", onDown);
-    renderer.domElement.addEventListener("pointerup", onUp);
-
-    const resize = () => {
-      const { clientWidth: w, clientHeight: h } = mount;
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(mount);
-
-    let frame = 0;
-    let explode = 0;
-    const tmp = new THREE.Vector3();
-    const tick = () => {
-      const now = performance.now() / 1000;
-      const { step: s, exploded: ex, selectedId: sel, stepStart } = state.current;
-      explode += ((ex ? 1 : 0) - explode) * 0.08;
-
-      // Assembly loop for the current step: wait, fly in, hold.
-      const cycle = 3.4;
-      const t = (now - stepStart) % cycle;
-      const assemble = ease(THREE.MathUtils.clamp((t - 0.5) / 1.4, 0, 1));
-      const pulse = 0.5 + 0.5 * Math.sin(now * 4);
-
-      for (const b of meshes) {
-        const mat = b.mesh.material as THREE.MeshStandardMaterial;
-        const line = b.edges.material as THREE.LineBasicMaterial;
-        const current = b.part.step === s;
-        const future = b.part.step > s;
-        const selected = sel === b.part.id;
-        const dimmed = sel !== null && !selected;
-
-        let fly = explode * radius * 0.4;
-        if (current && !ex) fly += (1 - assemble) * radius * 1.1;
-        b.mesh.position.copy(tmp.copy(b.away).multiplyScalar(fly).add(b.home));
-
-        if (future) {
-          mat.opacity = 0.05;
-          line.opacity = 0.12;
-        } else {
-          mat.opacity = dimmed ? 0.18 : 1;
-          line.opacity = dimmed ? 0.08 : current || selected ? 0.9 : 0.25;
-        }
-        mat.depthWrite = mat.opacity === 1;
-
-        if (selected) mat.emissive.copy(EMERALD).multiplyScalar(0.6 + 0.4 * pulse);
-        else if (current) mat.emissive.copy(AMBER).multiplyScalar(0.15 + 0.2 * pulse * assemble);
-        else mat.emissive.setHex(0x000000);
-      }
-      controls.autoRotate = sel === null;
-      controls.update();
-      renderer.render(scene, camera);
-      frame = requestAnimationFrame(tick);
-    };
-    tick();
-
+    engineRef.current = engine;
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      controls.dispose();
-      renderer.domElement.removeEventListener("pointerdown", onDown);
-      renderer.domElement.removeEventListener("pointerup", onUp);
-      for (const { mesh, edges } of meshes) {
-        mesh.geometry.dispose();
-        (mesh.material as THREE.Material).dispose();
-        edges.geometry.dispose();
-        (edges.material as THREE.Material).dispose();
-      }
-      grid.geometry.dispose();
-      (grid.material as THREE.Material).dispose();
-      renderer.dispose();
-      mount.removeChild(renderer.domElement);
+      engine.dispose();
+      engineRef.current = null;
     };
+  }, []);
+
+  // State first so the engine knows whether it's building when the first parts arrive.
+  useEffect(() => {
+    engineRef.current?.setState({ step, exploded, selectedId, building });
+  }, [step, exploded, selectedId, building]);
+
+  useEffect(() => {
+    engineRef.current?.setParts(parts);
   }, [parts]);
 
-  return <div ref={mountRef} className="h-full w-full cursor-grab active:cursor-grabbing" />;
+  const goto = (v: ViewName) => {
+    engineRef.current?.setView(v);
+    setView(v);
+  };
+  const reset = () => {
+    engineRef.current?.resetView();
+    setView("iso");
+  };
+
+  const showHint = controls && !building && !touched && selectedId === null && parts.length > 0;
+
+  return (
+    <div
+      className="relative h-full w-full overflow-hidden bg-black"
+      style={{ background: "radial-gradient(120% 95% at 50% 38%, #121212 0%, #060606 55%, #000 100%)" }}
+    >
+      <div ref={mountRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
+
+      {controls && (
+        <div className="font-pop absolute right-3 top-1/2 flex -translate-y-1/2 flex-col gap-0.5 rounded-xl border border-white/10 bg-[#0a0a0a]/85 p-1 text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur">
+          {VIEW_BUTTONS.map((b) => (
+            <button
+              key={b.view}
+              type="button"
+              title={b.title}
+              aria-label={b.title}
+              aria-pressed={view === b.view}
+              onClick={() => goto(b.view)}
+              className={`flex w-[52px] flex-col items-center gap-1 whitespace-nowrap rounded-lg px-1 pb-1.5 pt-1.5 text-[10px] leading-none transition ${
+                view === b.view ? "bg-white/15 text-white" : "text-white/55 hover:bg-white/[0.07] hover:text-white"
+              }`}
+            >
+              <CubeIcon view={b.view} />
+              {b.label}
+            </button>
+          ))}
+          <div className="mx-2 my-0.5 h-px bg-white/10" />
+          <button
+            type="button"
+            title="全体が見えるように戻す"
+            aria-label="視点をリセット"
+            onClick={reset}
+            className="flex w-[52px] flex-col items-center gap-1 whitespace-nowrap rounded-lg px-1 pb-1.5 pt-1.5 text-[10px] leading-none text-white/55 transition hover:bg-white/[0.07] hover:text-white"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="block">
+              <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+              <path d="M4.5 4.5v3.2h3.2" />
+              <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+            </svg>
+            リセット
+          </button>
+        </div>
+      )}
+
+      {controls && building && (
+        <div className="font-pop pointer-events-none absolute bottom-[76px] left-1/2 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-white/10 bg-[#0a0a0a]/85 px-3.5 py-1.5 text-xs text-white/80 backdrop-blur">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+          </span>
+          部品を組み立て中
+          <span className="tabular-nums text-white/45">{parts.length} 個</span>
+        </div>
+      )}
+
+      {showHint && (
+        <div className="font-pop pointer-events-none absolute bottom-[76px] left-1/2 hidden -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-white/10 bg-[#0a0a0a]/80 px-3.5 py-1.5 text-[11px] text-white/55 backdrop-blur sm:flex">
+          <span>ドラッグで回す</span>
+          <span className="h-3 w-px bg-white/15" />
+          <span>スクロールで拡大</span>
+          <span className="h-3 w-px bg-white/15" />
+          <span>部品をクリックでサイズ表示</span>
+        </div>
+      )}
+    </div>
+  );
 }
