@@ -1,569 +1,456 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Blueprint, Part } from "@/lib/blueprint";
+import type { Product } from "@/lib/products";
+import { HOUSEHOLD_TRASH, MAKE_REQUEST_KEY, toJpegBase64, type MakeRequest } from "@/lib/trash";
 
-const Viewer3D = dynamic(() => import("@/components/Viewer3D"), { ssr: false });
+type Phase = "idle" | "glitch" | "fall" | "reveal" | "ask" | "extra";
 
-/** Problem categories: pick one to fill in an example, then edit freely. */
-const CATEGORIES = [
-  { label: "植物", text: "旅行に行くと、部屋の植物がすぐ枯れてしまう" },
-  { label: "収納", text: "引き出しの中で小物がごちゃごちゃになる" },
-  { label: "デスク", text: "机の上のケーブルや充電器が散らかっている" },
-  { label: "スマホ", text: "オンライン通話のときにスマホを立てる物がない" },
-  { label: "キッチン", text: "キッチンで菜箸やおたまの置き場所がない" },
-  { label: "ペット", text: "猫が退屈そうにしている" },
-];
+const yen = (n: number) => `¥${Math.max(0, Math.round(n)).toLocaleString("ja-JP")}`;
 
-const LOADING_LINES = [
-  "写真をスキャン中",
-  "素材を見分けています",
-  "変身先を考えています",
-  "部品と手順を設計中",
-  "3Dモデルを生成中",
-];
-
-/** Downscale to keep the upload small and fast. */
-async function toJpegBase64(file: File, max = 1024): Promise<{ data: string; url: string }> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const url = canvas.toDataURL("image/jpeg", 0.85);
-  return { data: url.split(",")[1], url };
-}
-
-export default function Home() {
-  const [photo, setPhoto] = useState<{ data: string; url: string } | null>(null);
-  const [problem, setProblem] = useState("");
-  const [category, setCategory] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingLine, setLoadingLine] = useState(0);
+export default function ShopPage() {
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<{ slug: string; label: string }[]>([]);
+  const [source, setSource] = useState<"dummyjson" | "yahoo">("dummyjson");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ blueprint: Blueprint; demo: boolean } | null>(null);
-  const [step, setStep] = useState(1);
-  const [exploded, setExploded] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
+
+  const [target, setTarget] = useState<Product | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [shownPrice, setShownPrice] = useState(0);
+
+  // Questions after the reveal.
+  const [qIndex, setQIndex] = useState(0);
+  const [have, setHave] = useState<string[]>([]);
+  const [extra, setExtra] = useState("");
+  const [photo, setPhoto] = useState<{ data: string; url: string } | null>(null);
+  const [extraError, setExtraError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const outputRef = useRef<HTMLElement>(null);
+  const router = useRouter();
 
+  // Arriving from the 化けるボタン (bookmarklet / extension) on another shop:
+  // /?want=…&price=…&img=… skips our shop and goes straight to the reveal.
   useEffect(() => {
-    if (!loading) return;
-    const id = setInterval(() => setLoadingLine((i) => (i + 1) % LOADING_LINES.length), 1600);
-    return () => clearInterval(id);
-  }, [loading]);
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get("want");
+    if (!name) return;
+    const id = setTimeout(() => {
+      setTarget({
+        id: "external",
+        name,
+        category: "",
+        price: Number(params.get("price") ?? 0),
+        image: params.get("img") ?? "",
+        shop: params.get("from") ?? "",
+        rating: 0,
+        reviews: 0,
+      });
+      setPhase("reveal");
+    });
+    return () => clearTimeout(id);
+  }, []);
 
-  async function pick(file?: File) {
+  function answer(yes: boolean) {
+    const item = HOUSEHOLD_TRASH[qIndex];
+    const next = yes ? [...have, item.name] : have;
+    setHave(next);
+    if (qIndex + 1 < HOUSEHOLD_TRASH.length) setQIndex(qIndex + 1);
+    else setPhase("extra");
+  }
+
+  async function pickPhoto(file?: File) {
     if (!file || !file.type.startsWith("image/")) return;
-    setError(null);
+    setExtraError(null);
     setPhoto(await toJpegBase64(file));
   }
 
-  async function transform() {
-    if (!photo) return;
-    setLoading(true);
-    setLoadingLine(0);
-    setError(null);
-    try {
-      const res = await fetch("/api/transform", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: photo.data, mediaType: "image/jpeg", problem }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "エラーが発生しました。");
-      setResult(json);
-      setStep(1);
-      setExploded(false);
-      setSelectedId(null);
-      setTimeout(() => outputRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "エラーが発生しました。");
-    } finally {
-      setLoading(false);
+  function goMake() {
+    if (have.length === 0 && !extra.trim() && !photo) {
+      setExtraError("使えるゴミを書くか、写真を追加してください。");
+      return;
     }
+    const req: MakeRequest = {
+      want: target ? { name: target.name, price: target.price, img: target.image } : undefined,
+      trash: have,
+      extra: extra.trim(),
+      photo: photo ?? undefined,
+    };
+    try {
+      sessionStorage.setItem(MAKE_REQUEST_KEY, JSON.stringify(req));
+    } catch {
+      // Storage full or blocked: try again without the photo.
+      try {
+        sessionStorage.setItem(MAKE_REQUEST_KEY, JSON.stringify({ ...req, photo: undefined }));
+      } catch {
+        /* nothing more we can do; /make shows its manual form */
+      }
+    }
+    router.push("/make");
   }
 
-  const bp = result?.blueprint;
-  const total = bp?.steps.length ?? 0;
-  const finished = step > total;
-  const current = bp && !finished ? bp.steps[step - 1] : null;
-  const selected = bp?.parts.find((p) => p.id === selectedId) ?? null;
-
-  const partsBySource = useMemo(() => {
-    const groups = new Map<string, Part[]>();
-    for (const p of bp?.parts ?? []) groups.set(p.source, [...(groups.get(p.source) ?? []), p]);
-    return [...groups.entries()];
-  }, [bp]);
-
-  function goToStep(n: number) {
-    setStep(n);
-    setSelectedId(null);
+  function reset() {
+    setPhase("idle");
+    setTarget(null);
+    setQIndex(0);
+    setHave([]);
+    setExtra("");
+    setPhoto(null);
+    setExtraError(null);
+    if (window.location.search) window.history.replaceState(null, "", "/");
   }
 
-  function selectPart(p: Part) {
-    if (selectedId === p.id) return setSelectedId(null);
-    if (p.step > step) setStep(p.step);
-    setSelectedId(p.id);
+  // Search (debounced).
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ q: query, category });
+        const res = await fetch(`/api/products?${params}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error);
+        setProducts(json.products);
+        setCategories(json.categories);
+        setSource(json.source);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "読み込みに失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(id);
+  }, [query, category]);
+
+  // The 化ける sequence: glitch → everything falls → reveal.
+  function addToCart(p: Product) {
+    if (phase !== "idle") return;
+    setTarget(p);
+    setShownPrice(p.price);
+    setPhase("glitch");
+    setTimeout(() => setPhase("fall"), 900);
+    setTimeout(() => setPhase("reveal"), 2100);
   }
+
+  // Price counts down to ¥0 during the fall.
+  useEffect(() => {
+    if (phase !== "fall" || !target) return;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - start) / 1100);
+      setShownPrice(target.price * (1 - k * k));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [phase, target]);
+
+  // Stable random tilt per card for the fall.
+  const tilt = useMemo(() => products.map((_, i) => ((i * 53) % 61) - 30), [products]);
+
+  // Once the shop has broken apart it stays gone through the reveal and the questions.
+  const gone = phase !== "idle" && phase !== "glitch";
+  const question = HOUSEHOLD_TRASH[qIndex];
 
   return (
-    <div className="relative min-h-screen">
-      <div className="page-glow pointer-events-none absolute inset-x-0 top-0 h-[520px]" />
-
-      {/* Nav */}
-      <header className="sticky top-0 z-20 border-b border-champagne/70 bg-blush/80 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
-          <span className="text-sm font-medium tracking-[0.35em]">
-            BAKERU <span className="ml-1 tracking-[0.2em] text-amber">化ける</span>
-          </span>
-          <nav className="flex gap-8 text-xs tracking-[0.2em] text-espresso/60">
-            <a href="#input" className="transition hover:text-espresso">入力</a>
-            <a href="#output" className="transition hover:text-espresso">結果</a>
-          </nav>
+    <div
+      style={{ colorScheme: "light" }}
+      className={`min-h-screen overflow-x-hidden bg-[#f6f5f2] text-neutral-900 ${phase === "glitch" ? "bake-glitch" : ""}`}
+    >
+      {/* Header */}
+      <header
+        className={`sticky top-0 z-10 border-b border-neutral-200 bg-white transition duration-700 ${
+          gone ? "translate-y-[-120%] opacity-0" : ""
+        }`}
+      >
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:gap-6">
+          <button
+            onClick={() => {
+              setQuery("");
+              setCategory("");
+            }}
+            className="shrink-0 text-left leading-none"
+          >
+            <span className="block text-xl font-semibold tracking-tight text-emerald-700">KURASU</span>
+            <span className="block text-[10px] tracking-[0.2em] text-neutral-500">くらしの道具店</span>
+          </button>
+          <div className="flex flex-1 items-center rounded-full border border-neutral-300 bg-neutral-50 px-4 focus-within:border-emerald-600">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-neutral-400" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={source === "yahoo" ? "商品を検索（例：スマホスタンド）" : "Search (e.g. plant, rack, tray)"}
+              className="h-10 w-full bg-transparent px-3 text-sm outline-none placeholder:text-neutral-400"
+            />
+          </div>
+          <div className="relative shrink-0 text-neutral-700" aria-label="カート">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6.2" />
+              <circle cx="9.5" cy="20" r="1.3" />
+              <circle cx="17" cy="20" r="1.3" />
+            </svg>
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] text-white">
+              0
+            </span>
+          </div>
         </div>
+        {source === "dummyjson" && (
+          <div className="mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pb-3">
+            <Chip active={!category} onClick={() => setCategory("")}>
+              すべて
+            </Chip>
+            {categories.map((c) => (
+              <Chip key={c.slug} active={category === c.slug} onClick={() => setCategory(c.slug)}>
+                {c.label}
+              </Chip>
+            ))}
+          </div>
+        )}
       </header>
 
-      <main className="relative mx-auto max-w-7xl px-6">
-        {/* Motto */}
-        <section className="pb-10 pt-12">
-          <p className="mb-4 text-xs tracking-[0.3em] text-espresso/50">テーマ — 化ける / TRANSFORM</p>
-          <h1 className="text-3xl font-light leading-tight tracking-tight sm:text-5xl">
-            いらないものが、<span className="text-amber">使えるものに</span>化ける。
-          </h1>
-          <p className="mt-4 max-w-2xl text-sm font-light leading-relaxed text-espresso/65">
-            いらない物の写真と、困っていることを入れてください。AIが素材を見分けて、役に立つ物に変身させます。部品の切り出し方から組み立てまで、3Dで手順を案内します。
-          </p>
-        </section>
+      {/* Banner */}
+      <section
+        className={`mx-auto max-w-6xl px-4 pt-6 transition duration-700 ${
+          gone ? "translate-y-[60vh] rotate-6 opacity-0" : ""
+        }`}
+      >
+        <div className="flex items-center justify-between rounded-2xl bg-emerald-700 px-6 py-5 text-white">
+          <div>
+            <p className="text-xs tracking-[0.2em] text-emerald-100">AUTUMN SALE</p>
+            <p className="mt-1 text-lg font-semibold sm:text-2xl">暮らしを整える、秋の新生活セール</p>
+          </div>
+          <p className="hidden text-sm text-emerald-100 sm:block">全品送料無料 ・ 最大30%OFF</p>
+        </div>
+      </section>
 
-        {/* Input */}
-        <section id="input" className="scroll-mt-20 pb-20">
-          <div className="grid gap-5 lg:grid-cols-2">
-            {/* Photo */}
-            <div className="flex flex-col rounded-2xl border border-champagne bg-white/60 p-5">
-              <Label n="01" text="いらない物の写真" />
-              <div
-                onClick={() => fileInput.current?.click()}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragging(false);
-                  pick(e.dataTransfer.files[0]);
-                }}
-                className={`relative mt-4 flex aspect-[4/3] cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed transition ${
-                  dragging ? "border-amber bg-champagne/40" : "border-cognac/50 bg-blush hover:bg-champagne/25"
-                }`}
-              >
-                {photo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photo.url} alt="アップロードした写真" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="px-6 text-center">
-                    <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-amber text-2xl font-light text-blush">
-                      +
-                    </div>
-                    <p className="text-sm">写真をドロップ、またはクリックして選択</p>
-                    <p className="mt-2 text-xs text-espresso/50">ペットボトル、段ボール、古着、壊れた物など</p>
-                  </div>
-                )}
-                {loading && <div className="scanline pointer-events-none absolute inset-x-0 h-24" />}
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => pick(e.target.files?.[0])}
-                />
-              </div>
-              {photo && (
-                <button
-                  onClick={() => fileInput.current?.click()}
-                  className="mt-3 self-start text-xs text-espresso/55 underline-offset-4 hover:underline"
-                >
-                  写真を変更する
-                </button>
-              )}
-            </div>
-
-            {/* Problem */}
-            <div className="flex flex-col rounded-2xl border border-champagne bg-white/60 p-5">
-              <Label n="02" text="困っていること" />
-              <p className="mt-4 text-xs text-espresso/55">ジャンルを選ぶか、自由に書いてください（なくてもOK）</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {CATEGORIES.map((c) => (
-                  <button
-                    key={c.label}
-                    onClick={() => {
-                      setCategory(c.label);
-                      setProblem(c.text);
-                    }}
-                    className={`rounded-full border px-4 py-1.5 text-sm transition ${
-                      category === c.label
-                        ? "border-emerald bg-emerald text-blush"
-                        : "border-champagne bg-blush text-espresso/75 hover:border-cognac"
+      {/* Grid */}
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        {error && <p className="py-20 text-center text-sm text-red-600">{error}</p>}
+        {!error && !loading && products.length === 0 && (
+          <p className="py-20 text-center text-sm text-neutral-500">該当する商品が見つかりませんでした。</p>
+        )}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+          {loading && products.length === 0
+            ? Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="aspect-[3/4] animate-pulse rounded-xl bg-neutral-200" />
+              ))
+            : products.map((p, i) => {
+                const chosen = target?.id === p.id;
+                const falling = gone && !chosen;
+                return (
+                  <article
+                    key={p.id}
+                    style={
+                      falling
+                        ? {
+                            transform: `translateY(120vh) rotate(${tilt[i]}deg)`,
+                            transition: `transform 1s cubic-bezier(.55,0,.9,.4) ${(i % 8) * 60}ms, opacity 1s ${(i % 8) * 60}ms`,
+                            opacity: 0,
+                          }
+                        : undefined
+                    }
+                    className={`flex flex-col overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200 ${
+                      chosen && phase !== "idle" ? "relative z-20 ring-2 ring-emerald-600" : ""
                     }`}
                   >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                value={problem}
-                onChange={(e) => {
-                  setProblem(e.target.value);
-                  setCategory(null);
-                }}
-                placeholder="例：旅行に行くと植物が枯れてしまう"
-                rows={4}
-                className="mt-5 w-full flex-1 resize-none rounded-xl border border-champagne bg-blush p-4 text-lg font-light leading-relaxed outline-none placeholder:text-espresso/30 focus:border-amber"
-              />
+                    <div className="relative aspect-square bg-neutral-100">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.image} alt={p.name} loading="lazy" className="h-full w-full object-contain p-3" />
+                    </div>
+                    <div className="flex flex-1 flex-col p-3">
+                      <p className="line-clamp-2 text-sm leading-snug">{p.name}</p>
+                      <p className="mt-1 truncate text-[11px] text-neutral-500">{p.shop}</p>
+                      <p className="mt-1 text-xs text-amber-500">
+                        {"★".repeat(Math.round(p.rating))}
+                        <span className="text-neutral-300">{"★".repeat(5 - Math.round(p.rating))}</span>
+                        <span className="ml-1 text-neutral-500">({p.reviews})</span>
+                      </p>
+                      <p className="mt-auto pt-2 text-lg font-semibold">
+                        {chosen && phase !== "idle" ? yen(shownPrice) : yen(p.price)}
+                        <span className="ml-1 text-[10px] font-normal text-neutral-500">税込</span>
+                      </p>
+                      <button
+                        onClick={() => addToCart(p)}
+                        className="mt-2 h-9 rounded-full bg-emerald-600 text-sm font-medium text-white transition hover:bg-emerald-700 active:scale-[0.98]"
+                      >
+                        カートに入れる
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+        </div>
+      </main>
 
-              {error && <p className="mt-4 text-sm text-amber">{error}</p>}
+      <footer
+        className={`border-t border-neutral-200 bg-white px-4 py-8 text-center text-xs text-neutral-500 transition duration-700 ${
+          gone ? "opacity-0" : ""
+        }`}
+      >
+        <p>© KURASU くらしの道具店</p>
+        {source === "yahoo" ? (
+          <a href="https://developer.yahoo.co.jp/sitemap/" className="mt-2 inline-block underline">
+            Web Services by Yahoo! JAPAN
+          </a>
+        ) : (
+          <p className="mt-2">Product data: DummyJSON</p>
+        )}
+      </footer>
+
+      {/* Reveal */}
+      {phase === "reveal" && target && (
+        <div className="bake-fade fixed inset-0 z-30 flex items-center justify-center bg-black px-6 text-white">
+          <div className="w-full max-w-xl text-center">
+            <p className="bake-rise text-5xl font-light tracking-tight sm:text-7xl">待って。</p>
+            <p className="bake-rise mt-6 text-lg font-light text-white/70 [animation-delay:600ms] sm:text-2xl">
+              それ、家にあるゴミで作れます。
+            </p>
+            <div className="bake-rise mx-auto mt-10 flex max-w-sm items-center gap-4 rounded-2xl border border-white/15 p-4 text-left [animation-delay:1100ms]">
+              {target.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={target.image} alt="" className="h-16 w-16 shrink-0 rounded-lg bg-white object-contain p-1" />
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-sm">{target.name}</p>
+                <p className="mt-1 text-sm">
+                  <span className="text-white/40 line-through">{yen(target.price)}</span>
+                  <span className="ml-3 text-xl">¥0</span>
+                </p>
+              </div>
+            </div>
+            <div className="bake-rise mt-10 flex flex-col items-center gap-4 [animation-delay:1500ms]">
               <button
-                onClick={transform}
-                disabled={!photo || loading}
-                className="group mt-5 flex h-14 w-full items-center justify-between rounded-full bg-amber px-7 text-base font-medium text-blush transition enabled:hover:bg-[#a55c2d] disabled:cursor-not-allowed disabled:bg-champagne disabled:text-espresso/45"
+                onClick={() => setPhase("ask")}
+                className="inline-flex h-12 items-center rounded-full bg-white px-8 text-sm font-medium text-black transition hover:bg-white/85"
               >
-                <span>{loading ? `${LOADING_LINES[loadingLine]}…` : photo ? "化けさせる" : "まず写真を追加してください"}</span>
-                <span className={loading ? "animate-pulse" : "transition group-enabled:group-hover:translate-x-1"}>→</span>
+                作り方を見る →
+              </button>
+              <button onClick={reset} className="text-xs text-white/40 underline-offset-4 hover:underline">
+                それでも買う
               </button>
             </div>
           </div>
-        </section>
+        </div>
+      )}
 
-        {/* Output */}
-        <section id="output" ref={outputRef} className="scroll-mt-16 border-t border-champagne pb-24 pt-16">
-          <div className="mb-10 flex items-baseline gap-5">
-            <span className="font-mono text-xs text-espresso/45">03</span>
-            <h2 className="text-2xl font-light tracking-tight sm:text-3xl">変身結果</h2>
-          </div>
-
-          {!bp ? (
-            <div className="flex aspect-[21/9] items-center justify-center rounded-2xl border border-dashed border-cognac/50 text-sm text-espresso/45">
-              ここに3Dの設計図と作り方が表示されます
+      {/* Questions: household trash, one at a time */}
+      {phase === "ask" && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black px-6 text-white">
+          <div key={qIndex} className="bake-rise w-full max-w-md text-center">
+            <p className="text-xs tracking-[0.3em] text-white/40">
+              家にあるか教えてください　{qIndex + 1} / {HOUSEHOLD_TRASH.length}
+            </p>
+            <div className="mx-auto mt-6 flex justify-center gap-1.5">
+              {HOUSEHOLD_TRASH.map((t, i) => (
+                <span key={t.id} className={`h-1 w-8 rounded-full ${i <= qIndex ? "bg-white" : "bg-white/15"}`} />
+              ))}
             </div>
-          ) : (
-            <>
-              {result?.demo && (
-                <p className="mb-6 inline-block rounded-full bg-champagne/60 px-4 py-1.5 text-xs text-espresso/70">
-                  デモモード：ANTHROPIC_API_KEY を設定すると、あなたの写真をAIが解析します
-                </p>
+            <p className="mt-12 text-7xl" aria-hidden>
+              {question.emoji}
+            </p>
+            <p className="mt-8 text-3xl font-light sm:text-4xl">{question.name}は</p>
+            <p className="mt-2 text-3xl font-light sm:text-4xl">ありますか？</p>
+            <p className="mt-4 text-sm text-white/45">{question.detail}</p>
+            <div className="mt-12 grid grid-cols-2 gap-3">
+              <button
+                onClick={() => answer(false)}
+                className="h-14 rounded-full border border-white/25 text-base transition hover:border-white"
+              >
+                ない
+              </button>
+              <button
+                onClick={() => answer(true)}
+                className="h-14 rounded-full bg-white text-base font-medium text-black transition hover:bg-white/85"
+              >
+                ある
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Anything else? Optional photo or text, then go build */}
+      {phase === "extra" && (
+        <div className="fixed inset-0 z-30 overflow-y-auto bg-black px-6 py-12 text-white">
+          <div className="bake-rise mx-auto flex min-h-full w-full max-w-md flex-col justify-center text-center">
+            <p className="text-3xl font-light sm:text-4xl">他に使えそうな</p>
+            <p className="mt-2 text-3xl font-light sm:text-4xl">ゴミはありますか？</p>
+            <p className="mt-4 text-sm text-white/45">写真を撮るか、書いてください（なくてもOK）</p>
+
+            {have.length > 0 && (
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                {have.map((t) => (
+                  <span key={t} className="rounded-full border border-white/20 px-3 py-1 text-xs text-white/70">
+                    ✓ {t}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={() => fileInput.current?.click()}
+              className="mt-8 flex h-40 w-full items-center justify-center overflow-hidden rounded-2xl border border-dashed border-white/30 transition hover:border-white"
+            >
+              {photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photo.url} alt="追加したゴミの写真" className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-sm text-white/60">
+                  <span className="mb-2 block text-3xl">📷</span>
+                  写真を撮る・選ぶ
+                </span>
               )}
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => pickPhoto(e.target.files?.[0])}
+            />
 
-              {/* Title */}
-              <div className="mb-10 grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
-                <div>
-                  <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
-                    {bp.detected.items.map((it) => (
-                      <span key={it} className="rounded-full border border-champagne bg-white/60 px-3 py-1 text-espresso/70">
-                        {it}
-                      </span>
-                    ))}
-                    <span className="text-amber">→ 化けると</span>
-                  </div>
-                  <h3 className="text-3xl font-light tracking-tight sm:text-5xl">{bp.title}</h3>
-                  <p className="mt-4 max-w-2xl text-lg font-light text-espresso/70">{bp.tagline}</p>
-                </div>
-                <dl className="grid grid-cols-3 overflow-hidden rounded-2xl border border-champagne bg-white/60">
-                  <Stat label="難易度" value={`${bp.difficulty}/5`} />
-                  <Stat label="所要時間" value={`${bp.time_minutes}分`} />
-                  <Stat label="CO₂削減" value={`${bp.co2_saved_g}g`} />
-                </dl>
-              </div>
+            <input
+              value={extra}
+              onChange={(e) => {
+                setExtra(e.target.value);
+                setExtraError(null);
+              }}
+              placeholder="例：古いTシャツ、空き瓶、卵パック"
+              className="mt-4 h-12 w-full rounded-full border border-white/20 bg-transparent px-5 text-center text-sm outline-none placeholder:text-white/30 focus:border-white"
+            />
 
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-                {/* Viewer */}
-                <div className="lg:sticky lg:top-20 lg:self-start">
-                  <div className="viewer-bg relative h-[60vh] min-h-[420px] overflow-hidden rounded-2xl border border-champagne lg:h-[calc(100vh-7rem)]">
-                    <Viewer3D
-                      parts={bp.parts}
-                      step={step}
-                      exploded={exploded}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
-                    />
-                    <div className="pointer-events-none absolute left-5 top-5 max-w-[60%]">
-                      <p className="text-xs tracking-[0.25em] text-espresso/55">
-                        {finished ? "完成" : `STEP ${step} / ${total}`}
-                      </p>
-                      <p className="mt-1 text-lg font-light">{finished ? "化けた！" : current?.title}</p>
-                    </div>
-                    <div className="absolute right-5 top-5 flex overflow-hidden rounded-full border border-champagne bg-white/70 text-xs">
-                      <button
-                        onClick={() => setExploded(false)}
-                        className={`px-4 py-2 transition ${!exploded ? "bg-espresso text-blush" : "hover:bg-champagne/50"}`}
-                      >
-                        組み立て
-                      </button>
-                      <button
-                        onClick={() => setExploded(true)}
-                        className={`px-4 py-2 transition ${exploded ? "bg-espresso text-blush" : "hover:bg-champagne/50"}`}
-                      >
-                        分解図
-                      </button>
-                    </div>
+            {extraError && <p className="mt-4 text-sm text-red-400">{extraError}</p>}
 
-                    {selected && (
-                      <div className="absolute bottom-20 left-5 right-5 max-w-sm rounded-xl border border-emerald/30 bg-white/85 p-4 backdrop-blur">
-                        <div className="flex items-start justify-between gap-4">
-                          <p className="font-medium text-emerald">{selected.name}</p>
-                          <button onClick={() => setSelectedId(null)} className="text-espresso/45 hover:text-espresso" aria-label="閉じる">
-                            ×
-                          </button>
-                        </div>
-                        <p className="mt-1 text-sm text-espresso/70">
-                          {selected.source} ・ {selected.dimensions}
-                        </p>
-                        <p className="mt-2 text-sm font-light leading-relaxed">{selected.make}</p>
-                      </div>
-                    )}
-
-                    <div className="absolute inset-x-5 bottom-5 flex items-center gap-3">
-                      <RoundBtn onClick={() => goToStep(Math.max(1, step - 1))} label="前の手順">←</RoundBtn>
-                      <div className="flex flex-1 gap-1">
-                        {Array.from({ length: total + 1 }, (_, i) => (
-                          <button
-                            key={i}
-                            onClick={() => goToStep(i + 1)}
-                            aria-label={i === total ? "完成" : `手順 ${i + 1}`}
-                            className={`h-1 flex-1 rounded-full transition ${i + 1 <= step ? "bg-amber" : "bg-espresso/15"}`}
-                          />
-                        ))}
-                      </div>
-                      <RoundBtn onClick={() => goToStep(Math.min(total + 1, step + 1))} label="次の手順">→</RoundBtn>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-xs text-espresso/50">
-                    ドラッグで回転・スクロールで拡大。部品をクリックすると作り方が表示されます。
-                  </p>
-                </div>
-
-                {/* Detail column */}
-                <div className="flex flex-col gap-6">
-                  <div className="rounded-2xl bg-emerald p-6 text-blush">
-                    <p className="text-xs tracking-[0.25em] text-blush/60">解決すること</p>
-                    <p className="mt-3 font-light leading-relaxed">{bp.problem_solved}</p>
-                  </div>
-
-                  {/* Current step */}
-                  {current ? (
-                    <div className="rounded-2xl border border-champagne bg-white/70 p-6">
-                      <div className="flex items-baseline gap-4">
-                        <span className="font-mono text-4xl font-light text-amber">{String(step).padStart(2, "0")}</span>
-                        <div>
-                          <h4 className="text-xl font-medium">{current.title}</h4>
-                          <p className="mt-1 text-sm font-light text-espresso/65">{current.summary}</p>
-                        </div>
-                      </div>
-                      <ol className="mt-6 space-y-3">
-                        {current.actions.map((a, i) => (
-                          <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
-                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-champagne text-xs font-medium">
-                              {i + 1}
-                            </span>
-                            <span>{a}</span>
-                          </li>
-                        ))}
-                      </ol>
-
-                      {bp.parts.some((p) => p.step === step) && (
-                        <div className="mt-6">
-                          <p className="text-xs tracking-[0.2em] text-espresso/55">この手順で使う部品</p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {bp.parts
-                              .filter((p) => p.step === step)
-                              .map((p) => (
-                                <button
-                                  key={p.id}
-                                  onClick={() => selectPart(p)}
-                                  className={`rounded-full border px-3 py-1 text-sm transition ${
-                                    selectedId === p.id
-                                      ? "border-emerald bg-emerald text-blush"
-                                      : "border-champagne bg-blush hover:border-cognac"
-                                  }`}
-                                >
-                                  {p.name}
-                                  <span className="ml-2 text-xs opacity-60">{p.dimensions}</span>
-                                </button>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {(current.tip || current.caution) && (
-                        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                          {current.tip && (
-                            <div className="rounded-xl bg-cognac/20 p-4 text-sm leading-relaxed">
-                              <p className="mb-1 text-xs font-medium tracking-[0.2em] text-[#8a6330]">コツ</p>
-                              {current.tip}
-                            </div>
-                          )}
-                          {current.caution && (
-                            <div className="rounded-xl bg-amber/15 p-4 text-sm leading-relaxed">
-                              <p className="mb-1 text-xs font-medium tracking-[0.2em] text-amber">注意</p>
-                              {current.caution}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="mt-6 flex justify-between">
-                        <button
-                          onClick={() => goToStep(Math.max(1, step - 1))}
-                          disabled={step === 1}
-                          className="text-sm text-espresso/60 hover:text-espresso disabled:invisible"
-                        >
-                          ← 前へ
-                        </button>
-                        <button
-                          onClick={() => goToStep(step + 1)}
-                          className="rounded-full bg-espresso px-5 py-2 text-sm text-blush transition hover:bg-espresso/85"
-                        >
-                          {step === total ? "完成を見る →" : "次の手順 →"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-champagne bg-white/70 p-6">
-                      <p className="text-xl font-medium">完成！</p>
-                      <p className="mt-2 text-sm font-light leading-relaxed text-espresso/70">
-                        「分解図」で全部品の位置関係を確認できます。部品をクリックすると、その作り方が表示されます。
-                      </p>
-                      <button
-                        onClick={() => goToStep(1)}
-                        className="mt-4 rounded-full border border-espresso px-5 py-2 text-sm transition hover:bg-espresso hover:text-blush"
-                      >
-                        最初から見る
-                      </button>
-                    </div>
-                  )}
-
-                  {/* All steps */}
-                  <div className="overflow-hidden rounded-2xl border border-champagne bg-white/60">
-                    <p className="border-b border-champagne px-6 py-4 text-xs tracking-[0.25em] text-espresso/55">手順一覧</p>
-                    <ol>
-                      {bp.steps.map((s, i) => (
-                        <li key={i}>
-                          <button
-                            onClick={() => goToStep(i + 1)}
-                            className={`flex w-full items-baseline gap-4 border-b border-champagne/60 px-6 py-3 text-left transition last:border-b-0 ${
-                              step === i + 1 ? "bg-champagne/45" : "hover:bg-champagne/20"
-                            }`}
-                          >
-                            <span className={`font-mono text-xs ${step === i + 1 ? "text-amber" : "text-espresso/40"}`}>
-                              {String(i + 1).padStart(2, "0")}
-                            </span>
-                            <span className="text-sm">{s.title}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-
-                  {/* Cut list */}
-                  <div className="overflow-hidden rounded-2xl border border-champagne bg-white/60">
-                    <div className="border-b border-champagne px-6 py-4">
-                      <p className="text-xs tracking-[0.25em] text-espresso/55">部品リスト（切り出し表）</p>
-                    </div>
-                    {partsBySource.map(([source, list]) => (
-                      <div key={source} className="border-b border-champagne/60 px-6 py-4 last:border-b-0">
-                        <p className="mb-2 text-sm font-medium text-amber">{source}</p>
-                        <ul className="space-y-1">
-                          {list.map((p) => (
-                            <li key={p.id}>
-                              <button
-                                onClick={() => selectPart(p)}
-                                className={`grid w-full grid-cols-[auto_1fr_auto] items-baseline gap-3 rounded-lg px-2 py-2 text-left text-sm transition ${
-                                  selectedId === p.id ? "bg-emerald text-blush" : "hover:bg-champagne/30"
-                                }`}
-                              >
-                                <span
-                                  className="h-3 w-3 translate-y-0.5 rounded-sm border border-espresso/20"
-                                  style={{ background: p.color }}
-                                />
-                                <span>
-                                  {p.name}
-                                  <span className={`ml-2 text-xs ${selectedId === p.id ? "text-blush/75" : "text-espresso/55"}`}>
-                                    {p.dimensions}
-                                  </span>
-                                </span>
-                                <span className={`font-mono text-xs ${selectedId === p.id ? "text-blush/75" : "text-espresso/40"}`}>
-                                  手順{p.step}
-                                </span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Tools & materials */}
-                  <div className="grid grid-cols-2 gap-6 rounded-2xl border border-champagne bg-white/60 p-6 text-sm">
-                    <div>
-                      <p className="mb-3 text-xs tracking-[0.25em] text-espresso/55">道具</p>
-                      <ul className="space-y-1 font-light">
-                        {bp.tools.map((t) => (
-                          <li key={t}>{t}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="mb-3 text-xs tracking-[0.25em] text-espresso/55">素材</p>
-                      <ul className="space-y-1 font-light">
-                        {bp.detected.materials.map((m) => (
-                          <li key={m}>{m}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </section>
-      </main>
-
-      <footer className="border-t border-champagne px-6 py-8 text-xs tracking-[0.2em] text-espresso/45">
-        <div className="mx-auto max-w-7xl">BAKERU — いらないものが、使えるものに化ける。</div>
-      </footer>
+            <button
+              onClick={goMake}
+              className="mt-8 h-14 w-full rounded-full bg-white text-base font-medium text-black transition hover:bg-white/85"
+            >
+              {photo || extra.trim() ? "化けさせる →" : "これで化けさせる →"}
+            </button>
+            <button onClick={reset} className="mt-6 text-xs text-white/40 underline-offset-4 hover:underline">
+              やっぱり買う
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Label({ n, text }: { n: string; text: string }) {
-  return (
-    <div className="flex items-baseline gap-3">
-      <span className="font-mono text-xs text-amber">{n}</span>
-      <span className="text-base font-medium">{text}</span>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-r border-champagne px-6 py-4 last:border-r-0">
-      <dt className="text-[11px] tracking-[0.2em] text-espresso/55">{label}</dt>
-      <dd className="mt-1 text-2xl font-light">{value}</dd>
-    </div>
-  );
-}
-
-function RoundBtn({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
-      aria-label={label}
-      className="h-10 w-10 shrink-0 rounded-full border border-espresso/25 bg-white/70 text-sm transition hover:border-espresso"
+      className={`shrink-0 rounded-full border px-3 py-1 text-xs transition ${
+        active ? "border-emerald-700 bg-emerald-700 text-white" : "border-neutral-300 bg-white text-neutral-700 hover:border-neutral-500"
+      }`}
     >
       {children}
     </button>

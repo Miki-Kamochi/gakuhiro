@@ -3,8 +3,10 @@ import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { BlueprintSchema, DEMO_BLUEPRINT } from "@/lib/blueprint";
 
 const SYSTEM = `あなたは「BAKERU（化ける）」というアップサイクル設計士です。
-ユーザーは、ゴミやいらなくなった物の写真と、生活の中の困りごと（任意）を送ってきます。
-写真に写っている物と一般的な家庭の道具だけで、その困りごとを解決する「役に立つ物」を1つ考えてください。
+ユーザーは、家にあるゴミのリストや写真と、「買おうとしていた物」または生活の中の困りごとを送ってきます。
+リストや写真にあるゴミと一般的な家庭の道具だけで作れる「役に立つ物」を1つ考えてください。
+「買おうとしていた物」がある場合は、それと同じ役割を果たす物をゴミで作る設計にしてください（買わずに済むように）。
+リストや写真にあるゴミをすべて使う必要はありません。作りやすさと完成度を優先してください。
 ありきたりではなく、驚きのある変身を優先してください。ただし1時間以内で作れるものにします。
 
 出力はすべて日本語で書いてください（色の16進数とidを除く）。
@@ -25,15 +27,33 @@ const MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as co
 type MediaType = (typeof MEDIA_TYPES)[number];
 
 export async function POST(request: Request) {
-  const { image, mediaType, problem } = (await request.json()) as {
+  const { image, mediaType, problem, trash, extra, want } = (await request.json()) as {
     image?: string;
     mediaType?: string;
     problem?: string;
+    trash?: string[];
+    extra?: string;
+    want?: { name?: string; price?: number };
   };
 
-  if (!image || !MEDIA_TYPES.includes(mediaType as MediaType)) {
+  const trashList = (Array.isArray(trash) ? trash : []).map((t) => String(t).slice(0, 50)).slice(0, 20);
+  const extraText = extra?.trim().slice(0, 300) ?? "";
+
+  if (image && !MEDIA_TYPES.includes(mediaType as MediaType)) {
     return Response.json({ error: "JPEG・PNG・WebP・GIFの写真を添付してください。" }, { status: 400 });
   }
+  if (!image && trashList.length === 0 && !extraText) {
+    return Response.json({ error: "使えるゴミを1つ以上選ぶか、写真を追加してください。" }, { status: 400 });
+  }
+
+  const lines = [
+    want?.name ? `買おうとしていた物: ${String(want.name).slice(0, 200)}${want.price ? `（¥${want.price}）` : ""}` : "",
+    trashList.length ? `家にあるゴミ: ${trashList.join("、")}` : "",
+    extraText ? `その他に使えそうな物: ${extraText}` : "",
+    image ? "写真にも使えそうなゴミが写っています。" : "",
+    problem?.trim() ? `困りごと: ${problem.trim().slice(0, 500)}` : "",
+  ].filter(Boolean);
+  if (!want?.name && !problem?.trim()) lines.push("特に困りごとはありません。驚くような役に立つ物を考えてください。");
 
   // APIキーが無い場合はデモを返す（UIを常に見せられるように）
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -54,13 +74,10 @@ export async function POST(request: Request) {
         {
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: mediaType as MediaType, data: image } },
-            {
-              type: "text",
-              text: problem?.trim()
-                ? `困りごと: ${problem.trim()}`
-                : "特に困りごとはありません。驚くような役に立つ物を考えてください。",
-            },
+            ...(image
+              ? [{ type: "image" as const, source: { type: "base64" as const, media_type: mediaType as MediaType, data: image } }]
+              : []),
+            { type: "text" as const, text: lines.join("\n") },
           ],
         },
       ],
