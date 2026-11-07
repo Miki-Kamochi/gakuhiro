@@ -513,6 +513,7 @@ export default function MakePage() {
                       exploded={exploded}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
+                      building={building}
                     />
                     <div className="pointer-events-none absolute left-5 top-5 max-w-[60%]">
                       <p className="text-xs tracking-[0.25em] text-ink/55">
