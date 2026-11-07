@@ -31,11 +31,19 @@ const SYSTEM = `あなたは「化けラボ」というアップサイクル設�
 - 色は実際の素材に近づける（段ボール #c69a6a、ペットボトル #cfe8f5、牛乳パック #f4f1ea、缶 #b9bec4、芯 #d9c4a3）。
 
 手順 (steps):
-- 3〜5手順。前半で素材を切り出す・準備する手順を入れる。
-- 各手順の actions には、寸法・位置・道具を含めた具体的な作業を2〜4個、短く書く。
-- 安全に作れるように注意点を書く。
+- 7〜10手順。初めて作る人が、説明だけを見て迷わず完成できるように細分化する。1つの手順では1つのまとまった作業だけをする。
+- 手順1は必ず「材料を切り出す」: 最初の action でゴミを洗う・乾かす・ラベルをはがすことを書き、続けて使う部品をすべて、1部品につき1つの action で「どのゴミから・何cm×何cmを・何枚・どの道具で切り出すか」を書く。この手順では組み立てない。
+- 手順2以降の流れ: 印をつける → 穴をあける・折る・曲げる → 仮組みして確かめる → 1か所ずつ固定する → 乾かす・補強する → 仕上げ・使い方。組み立ては、部品1〜2個ずつ別の手順に分ける。
+- 各手順の actions は2〜5個。1つの action は1つの動作だけにし、次を具体的に書く:
+  - どの部品に・どこから何cmの位置に（例:「底から12cmの位置に油性ペンで1周線を引く」）
+  - どの道具で・どうやって（例:「カッターで切れ目を入れてから、ハサミで線に沿って切る」）
+  - 向き・合わせる位置（例:「切り口を上にして、缶の中央に立てる」）
+  - 固定のしかたと量（例:「角の内側にガムテープを5cmずつ2か所貼る」「木工用ボンドを塗って10分押さえる」）
+  - できたかどうかの確認（例:「ぐらつかないか、軽く押して確かめる」）
+- 部品の step は、その部品を取り付ける（組み込む）手順の番号にする（切り出すだけの手順1ではなく、2以降）。
+- tip にはうまくいくコツ、caution には刃物・切り口・キリなどの安全上の注意を書く。
 
-文章は短く簡潔に。考える時間は、3Dモデルの寸法と位置を正確にすることに使ってください。`;
+文章は1文ずつ短く。考える時間は、3Dモデルの寸法と位置の正確さと、手順の具体さに使ってください。`;
 
 /** Second, faster pass: fix only the coordinates of a model whose geometry check failed. */
 const REPAIR_SYSTEM = `あなたは3Dモデルの寸法チェック担当です。アップサイクル作品の3Dモデル（部品の形・寸法・位置・回転）と、自動チェックで見つかった問題点が渡されます。
@@ -130,13 +138,28 @@ function streamResponse(run: (send: Send) => Promise<void>) {
   const encoder = new TextEncoder();
   const body = new ReadableStream({
     async start(controller) {
-      const send: Send = (event) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      let open = true;
+      // The visitor may leave mid-generation; writing to a closed stream must not crash the request.
+      const send: Send = (event) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        } catch {
+          open = false;
+        }
+      };
       try {
         await run(send);
       } catch (error) {
         send({ t: "e", error: errorMessage(error) });
       }
-      controller.close();
+      if (open) {
+        try {
+          controller.close();
+        } catch {
+          /* already closed by the client */
+        }
+      }
     },
   });
   return new Response(body, {

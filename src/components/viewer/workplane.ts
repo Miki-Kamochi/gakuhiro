@@ -176,6 +176,12 @@ export class Workplane {
     return texture;
   }
 
+  /** AR: hide the cutting mat so the camera image shows through; keep the contact shadow. */
+  setFloorVisible(visible: boolean) {
+    this.mat.visible = visible;
+    this.shadow.material.opacity = visible ? 0.6 : 0.42;
+  }
+
   dispose() {
     this.texture?.dispose();
     this.mat.geometry.dispose();

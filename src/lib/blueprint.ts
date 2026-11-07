@@ -25,7 +25,9 @@ export const PartSchema = z.object({
 export const StepSchema = z.object({
   title: z.string().describe("手順のタイトル（日本語、短く）"),
   summary: z.string().describe("この手順で何をするかを1文で（日本語）"),
-  actions: z.array(z.string()).describe("具体的な作業を2〜4個。寸法・位置・道具を含めて短く（日本語）"),
+  actions: z
+    .array(z.string())
+    .describe("具体的な作業を2〜5個（手順1の切り出しは部品の数だけ）。1つに1動作。位置(cm)・道具・向き・固定方法・確認を含めて短く（日本語）"),
   tip: z.string().describe("うまくいくコツ（日本語）。なければ空文字"),
   caution: z.string().describe("安全上の注意（日本語）。なければ空文字"),
 });

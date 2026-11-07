@@ -18,6 +18,8 @@ export type ViewerProps = {
   building?: boolean;
   /** Show the view buttons / hints overlay. Default true. */
   controls?: boolean;
+  /** AR: transparent background (a camera feed sits behind), no floor, Shift+drag moves the model. */
+  ar?: boolean;
 };
 
 const VIEW_BUTTONS: { view: ViewName; label: string; title: string }[] = [
@@ -64,6 +66,7 @@ export default function Viewer3D({
   onSelect,
   building = false,
   controls = true,
+  ar = false,
 }: ViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ViewerEngine | null>(null);
@@ -109,6 +112,31 @@ export default function Viewer3D({
     engineRef.current?.setParts(parts);
   }, [parts]);
 
+  // AR mode on/off. The offset (Shift+drag) starts centred each time.
+  const offset = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    offset.current = { x: 0, y: 0 };
+    engineRef.current?.setAR(ar);
+  }, [ar]);
+
+  /** AR: Shift+drag (or right-drag) slides the model over the camera image. Runs before the orbit controls. */
+  const onPointerDownCapture = (e: React.PointerEvent) => {
+    if (!ar || !(e.shiftKey || e.button === 2)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY, ox: offset.current.x, oy: offset.current.y };
+    const move = (ev: PointerEvent) => {
+      offset.current = { x: start.ox + ev.clientX - start.x, y: start.oy + ev.clientY - start.y };
+      engineRef.current?.setScreenOffset(offset.current.x, offset.current.y);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const goto = (v: ViewName) => {
     engineRef.current?.setView(v);
     setView(v);
@@ -118,7 +146,7 @@ export default function Viewer3D({
     setView("iso");
   };
 
-  const showHint = controls && !building && !touched && selectedId === null && parts.length > 0;
+  const showHint = controls && !ar && !building && !touched && selectedId === null && parts.length > 0;
 
   if (failed) {
     return (
@@ -129,10 +157,15 @@ export default function Viewer3D({
   }
   return (
     <div
-      className="relative h-full w-full overflow-hidden bg-black"
-      style={{ background: "radial-gradient(120% 95% at 50% 38%, #121212 0%, #060606 55%, #000 100%)" }}
+      className={`relative h-full w-full overflow-hidden ${ar ? "" : "bg-black"}`}
+      style={ar ? undefined : { background: "radial-gradient(120% 95% at 50% 38%, #121212 0%, #060606 55%, #000 100%)" }}
     >
-      <div ref={mountRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
+      <div
+        ref={mountRef}
+        onPointerDownCapture={onPointerDownCapture}
+        onContextMenu={ar ? (e) => e.preventDefault() : undefined}
+        className="absolute inset-0 cursor-grab active:cursor-grabbing"
+      />
 
       {controls && (
         <div className="font-pop absolute right-3 top-1/2 flex -translate-y-1/2 flex-col gap-0.5 rounded-xl border border-white/10 bg-[#0a0a0a]/85 p-1 text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur">

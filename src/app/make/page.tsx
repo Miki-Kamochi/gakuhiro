@@ -44,6 +44,46 @@ export default function MakePage() {
   const [copied, setCopied] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [tab, setTab] = useState<"steps" | "parts" | "info">("steps");
+
+  // Webcam AR: the camera image behind a transparent 3D view.
+  const [ar, setAr] = useState(false);
+  const [arError, setArError] = useState<string | null>(null);
+  const [mirror, setMirror] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setAr(false);
+  }
+
+  async function toggleAR() {
+    if (ar) return stopCamera();
+    setArError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setAr(true);
+      setExploded(false);
+    } catch (e) {
+      const denied = e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
+      setArError(denied ? "カメラの使用が許可されていません" : "カメラを起動できませんでした");
+      setTimeout(() => setArError(null), 4000);
+    }
+  }
+
+  // Attach the stream once the <video> exists; release the camera on leave.
+  useEffect(() => {
+    if (ar && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [ar]);
+  useEffect(() => () => streamRef.current?.getTracks().forEach((t) => t.stop()), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const outputRef = useRef<HTMLElement>(null);
 
@@ -447,6 +487,15 @@ export default function MakePage() {
               panelOpen ? "lg:left-[372px]" : "lg:left-0"
             }`}
           >
+            {ar && (
+              <video
+                ref={videoRef}
+                muted
+                playsInline
+                className="absolute inset-0 h-full w-full bg-black object-cover"
+                style={mirror ? { transform: "scaleX(-1)" } : undefined}
+              />
+            )}
             <Viewer3D
               parts={bp.parts}
               step={building ? 999 : step}
@@ -454,7 +503,18 @@ export default function MakePage() {
               selectedId={selectedId}
               onSelect={setSelectedId}
               building={building}
+              ar={ar}
             />
+
+            {/* AR help + camera error */}
+            {ar && (
+              <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-[#0a0a0a]/80 px-4 py-1.5 text-[11px] text-white/75 backdrop-blur">
+                ドラッグで回転 ・ ホイールで大きさ ・ Shift+ドラッグで移動
+              </div>
+            )}
+            {arError && (
+              <div className="absolute left-1/2 top-14 -translate-x-1/2 rounded-full bg-white px-4 py-2 text-xs text-black">{arError}</div>
+            )}
 
             {/* Top right: view mode + actions */}
             <div className="absolute right-3 top-3 flex flex-wrap items-center justify-end gap-2">
@@ -463,6 +523,28 @@ export default function MakePage() {
                   デモモード
                 </span>
               )}
+              <div className="flex overflow-hidden rounded-full border border-white/10 bg-[#0a0a0a]/85 text-xs backdrop-blur">
+                <button
+                  onClick={toggleAR}
+                  title="カメラの映像に3Dを重ねる"
+                  className={`flex items-center gap-1.5 px-4 py-2 transition ${ar ? "bg-white text-black" : "text-white/85 hover:bg-white/10"}`}
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path d="M3 8V6a2 2 0 0 1 2-2h2M17 4h2a2 2 0 0 1 2 2v2M21 16v2a2 2 0 0 1-2 2h-2M7 20H5a2 2 0 0 1-2-2v-2" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  {ar ? "AR終了" : "AR"}
+                </button>
+                {ar && (
+                  <button
+                    onClick={() => setMirror((m) => !m)}
+                    title="映像を左右反転"
+                    className="border-l border-white/10 px-3 py-2 text-white/75 transition hover:bg-white/10"
+                  >
+                    ⇋
+                  </button>
+                )}
+              </div>
               <div className="flex overflow-hidden rounded-full border border-white/10 bg-[#0a0a0a]/85 text-xs backdrop-blur">
                 <button
                   onClick={() => setExploded(false)}

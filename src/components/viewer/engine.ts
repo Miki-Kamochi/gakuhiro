@@ -137,6 +137,9 @@ export class ViewerEngine {
   private framing = { active: false, target: new THREE.Vector3(0, 8, 0), dist: 60, dir: new THREE.Vector3(), turn: false };
   private userMoved = false;
   private spin = true;
+  /** Screen-space shift of the rendered image (px), for placing the model over a camera feed. */
+  private offsetX = 0;
+  private offsetY = 0;
   private hasFramed = false;
 
   private width = 1;
@@ -297,6 +300,31 @@ export class ViewerEngine {
     this.framing.turn = true;
     this.spin = true;
     this.fit(false);
+  }
+
+  /** AR: no floor, no turntable, so the model sits still over the camera image. */
+  setAR(on: boolean) {
+    this.workplane.setFloorVisible(!on);
+    this.spin = on ? false : !this.userMoved;
+    if (!on) this.setScreenOffset(0, 0);
+    else if (!this.running) this.render(performance.now() / 1000, 0);
+  }
+
+  /** Move the rendered model on screen by (dx, dy) px without moving the camera. */
+  setScreenOffset(dx: number, dy: number) {
+    this.offsetX = dx;
+    this.offsetY = dy;
+    this.applyProjection();
+    if (!this.running) this.render(performance.now() / 1000, 0);
+  }
+
+  private applyProjection() {
+    const w = Math.max(this.width, 1);
+    const h = Math.max(this.height, 1);
+    this.camera.aspect = w / h;
+    if (this.offsetX || this.offsetY) this.camera.setViewOffset(w, h, -this.offsetX, -this.offsetY, w, h);
+    else this.camera.clearViewOffset();
+    this.camera.updateProjectionMatrix();
   }
 
   dispose() {
@@ -823,8 +851,7 @@ export class ViewerEngine {
     this.width = w;
     this.height = h;
     this.renderer.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    this.applyProjection();
     for (const e of this.list) (e.edges.material as LineMaterial).resolution.set(w, h);
     if (!this.running) this.render(performance.now() / 1000, 0);
   };
