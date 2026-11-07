@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
+/* Monochrome palette: true black, near-black panels, white and greys. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #000000;
+  --foreground: #ffffff;
 }
 
 @theme inline {
@@ -12,15 +13,38 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+::selection {
+  background: #ffffff;
+  color: #000000;
+}
+
+.hero-glow {
+  background:
+    radial-gradient(60% 50% at 75% 30%, rgba(255, 255, 255, 0.09), transparent 70%),
+    radial-gradient(40% 40% at 20% 80%, rgba(140, 160, 255, 0.06), transparent 70%);
+}
+
+.scanline {
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.25), transparent);
+  animation: scan 1.8s ease-in-out infinite;
+}
+
+@keyframes scan {
+  from {
+    top: -6rem;
+  }
+  to {
+    top: 100%;
+  }
 }
