@@ -1,18 +1,27 @@
 @import "tailwindcss";
 
-/* Palette: Blush / Champagne / Cognac / Amber / Emerald / Espresso */
+/* Monochrome palette (Neuralink-like): black, near-black panels, white and greys. */
 @theme {
-  --color-blush: #f9edf0;
-  --color-champagne: #e6c8b7;
-  --color-cognac: #c3955b;
-  --color-amber: #ba6a36;
-  --color-emerald: #1c3934;
-  --color-espresso: #261311;
+  --color-paper: #000000;
+  --color-panel: #0a0a0a;
+  --color-ink: #ffffff;
+  --color-line: #262626;
+  --color-dim: #8c8c8c;
+  --color-accent: #ffffff;
 }
 
 @theme inline {
-  --font-sans: var(--font-geist-sans), var(--font-noto-jp), "Hiragino Sans", sans-serif;
+  --font-brush: var(--font-yuji), "Hiragino Mincho ProN", serif;
+  --font-pop: var(--font-zenmaru), "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
+  --font-sans: var(--font-zenmaru), "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
   --font-mono: var(--font-geist-mono);
+}
+
+/* Title font: free Yuji Boku, thickened so it reads like a bold brush. */
+.font-brush {
+  -webkit-text-stroke: 0.035em currentColor;
+  paint-order: stroke fill;
+  letter-spacing: 0.02em;
 }
 
 html {
@@ -20,31 +29,28 @@ html {
 }
 
 body {
-  background: var(--color-blush);
-  color: var(--color-espresso);
-  font-family: var(--font-geist-sans), var(--font-noto-jp), "Hiragino Sans", "Yu Gothic", sans-serif;
-  -webkit-tap-highlight-color: transparent;
-  /* Break Japanese at phrase boundaries, not mid-word (Chrome; ignored elsewhere). */
-  word-break: auto-phrase;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-zenmaru), "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
 }
 
 ::selection {
-  background: var(--color-amber);
-  color: var(--color-blush);
+  background: #ffffff;
+  color: #000000;
 }
 
 .page-glow {
   background:
-    radial-gradient(50% 40% at 85% 0%, rgba(230, 200, 183, 0.9), transparent 70%),
-    radial-gradient(40% 30% at 0% 20%, rgba(195, 149, 91, 0.18), transparent 70%);
+    radial-gradient(50% 40% at 85% 0%, rgba(255, 255, 255, 0.08), transparent 70%),
+    radial-gradient(40% 30% at 0% 20%, rgba(140, 160, 255, 0.05), transparent 70%);
 }
 
 .viewer-bg {
-  background: radial-gradient(ellipse at 50% 40%, #fffaf8 0%, #f6e4dc 55%, #ecd3c6 100%);
+  background: radial-gradient(ellipse at 50% 40%, #161616 0%, #070707 60%, #000000 100%);
 }
 
 .scanline {
-  background: linear-gradient(to bottom, transparent, rgba(186, 106, 54, 0.35), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.25), transparent);
   animation: scan 1.8s ease-in-out infinite;
 }
 
@@ -92,7 +98,7 @@ body {
 
 /* Gentle shimmer for loading placeholders */
 .shimmer {
-  background: linear-gradient(100deg, rgba(230, 200, 183, 0.25) 30%, rgba(255, 250, 248, 0.9) 50%, rgba(230, 200, 183, 0.25) 70%);
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.03) 30%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.03) 70%);
   background-size: 300% 100%;
   animation: shimmer 1.6s ease-in-out infinite;
 }
@@ -103,7 +109,7 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-amber);
+  outline: 2px solid currentColor;
   outline-offset: 2px;
 }
 

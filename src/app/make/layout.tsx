@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f9edf0",
+  themeColor: "#000000",
 };
 
 export default function MakeLayout({ children }: LayoutProps<"/make">) {
