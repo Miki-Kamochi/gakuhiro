@@ -41,6 +41,10 @@ const HOLD = 2.1;
 const FADE = 0.28;
 const POP = 0.5;
 const SNAP = 0.45;
+// Cutting step: each piece is marked (dashed outline), then cut free (lifts and glows).
+const CUT_MARK = 0.5;
+const CUT_LIFT = 0.45;
+const CUT_EACH = 0.6;
 
 const WHITE = new THREE.Color(0xffffff);
 
@@ -82,6 +86,13 @@ type Entry = {
   bornAt: number;
   opacity: number;
   hover: number;
+  /** Assembled orientation (from the part's rotation). */
+  homeQuat: THREE.Quaternion;
+  /** Cutting step: laid flat on the mat in a grid, cut out one after another. */
+  cutQuat: THREE.Quaternion;
+  cutExt: THREE.Box3;
+  cutPos: THREE.Vector3;
+  cutIndex: number;
 };
 
 type Dims = {
@@ -276,6 +287,7 @@ export class ViewerEngine {
 
   setState(next: ViewerState) {
     const prev = this.state;
+    const wasCutting = this.isCutting(prev);
     if (next.step !== prev.step || next.building !== prev.building) this.stepStart = performance.now() / 1000;
     this.state = { ...next };
     this.countCurrent();
@@ -284,6 +296,7 @@ export class ViewerEngine {
       if (next.selectedId) this.spin = false;
     }
     if (next.exploded !== prev.exploded && this.list.length > 0) this.fit(false, next.exploded);
+    else if (this.isCutting() !== wasCutting && this.list.length > 0) this.fit(false);
   }
 
   setView(view: ViewName) {
@@ -438,6 +451,22 @@ export class ViewerEngine {
     _m.makeRotationFromEuler(_e.copy(mesh.rotation));
     const ext = new THREE.Box3().copy(geometry.boundingBox!).applyMatrix4(_m);
 
+    // Cutting step: panels lie flat on the mat (thinnest side down); round parts stay as they are.
+    const homeQuat = mesh.quaternion.clone();
+    const cutQuat = homeQuat.clone();
+    const sx = ext.max.x - ext.min.x;
+    const sy = ext.max.y - ext.min.y;
+    const sz = ext.max.z - ext.min.z;
+    if (!isRound(part) && Math.min(sx, sz) < 0.5 * Math.min(Math.max(sx, sz), sy) && Math.min(sx, sz) < sy) {
+      const flat = new THREE.Quaternion().setFromAxisAngle(
+        sx < sz ? _v.set(0, 0, 1) : _v.set(1, 0, 0),
+        Math.PI / 2,
+      );
+      cutQuat.premultiply(flat);
+    }
+    _m.makeRotationFromQuaternion(cutQuat);
+    const cutExt = new THREE.Box3().copy(geometry.boundingBox!).applyMatrix4(_m);
+
     const { el, chip, sub } = this.makePartLabel(part);
     const label = this.labels.add(el, 1, 1);
 
@@ -469,6 +498,11 @@ export class ViewerEngine {
       bornAt,
       opacity: 0,
       hover: 0,
+      homeQuat,
+      cutQuat,
+      cutExt,
+      cutPos: new THREE.Vector3(),
+      cutIndex: index,
     };
   }
 
@@ -587,13 +621,17 @@ export class ViewerEngine {
       e.ghost.position.copy(e.home);
     }
 
-    // Workplane: covers the model and its exploded spread, snapped to 5cm.
+    this.layoutCutSheet();
+
+    // Workplane: covers the model, its exploded spread and the cut sheet, snapped to 5cm.
     const cx = Math.round(this.center.x / 5) * 5;
     const cz = Math.round(this.center.z / 5) * 5;
     let foot = 6;
     for (const e of list) {
       foot = Math.max(foot, Math.abs(e.home.x + e.ext.max.x - cx), Math.abs(e.home.x + e.ext.min.x - cx));
       foot = Math.max(foot, Math.abs(e.home.z + e.ext.max.z - cz), Math.abs(e.home.z + e.ext.min.z - cz));
+      foot = Math.max(foot, Math.abs(e.cutPos.x + e.cutExt.max.x - cx), Math.abs(e.cutPos.x + e.cutExt.min.x - cx));
+      foot = Math.max(foot, Math.abs(e.cutPos.z + e.cutExt.max.z - cz), Math.abs(e.cutPos.z + e.cutExt.min.z - cz));
     }
     const half = Math.max(15, Math.ceil((foot * 1.4 + 4) / 5) * 5);
     this.workplane.setExtent(cx, cz, half, this.groundY);
@@ -614,6 +652,56 @@ export class ViewerEngine {
     this.rim.target.position.copy(this.center);
 
     this.countCurrent();
+  }
+
+  /** Cutting step layout: every piece flat on the mat, packed in rows, centred under the model. */
+  private layoutCutSheet() {
+    const list = this.list;
+    if (list.length === 0) return;
+    const gap = THREE.MathUtils.clamp(this.radius * 0.08, 1.2, 4);
+    let area = 0;
+    let widest = 0;
+    for (const e of list) {
+      const w = e.cutExt.max.x - e.cutExt.min.x;
+      const d = e.cutExt.max.z - e.cutExt.min.z;
+      area += (w + gap) * (d + gap);
+      widest = Math.max(widest, w);
+    }
+    const rowMax = Math.max(Math.sqrt(area) * 1.3, widest);
+
+    let x = 0;
+    let z = 0;
+    let rowDepth = 0;
+    let maxX = 0;
+    list.forEach((e, i) => {
+      const w = e.cutExt.max.x - e.cutExt.min.x;
+      const d = e.cutExt.max.z - e.cutExt.min.z;
+      if (x > 0 && x + w > rowMax) {
+        x = 0;
+        z += rowDepth + gap;
+        rowDepth = 0;
+      }
+      // Position so the piece's footprint starts at (x, z) and it rests on the mat.
+      e.cutPos.set(x - e.cutExt.min.x, this.groundY - e.cutExt.min.y, z - e.cutExt.min.z);
+      e.cutIndex = i;
+      x += w + gap;
+      maxX = Math.max(maxX, x - gap);
+      rowDepth = Math.max(rowDepth, d);
+    });
+    const ox = this.center.x - maxX / 2;
+    const oz = this.center.z - (z + rowDepth) / 2;
+    for (const e of list) {
+      e.cutPos.x += ox;
+      e.cutPos.z += oz;
+    }
+  }
+
+  /** Steps before the first assembly step are preparation (cutting out, marking): show the cut sheet. */
+  private isCutting(s: ViewerState = this.state): boolean {
+    if (s.building || s.exploded || this.list.length === 0) return false;
+    let first = Infinity;
+    for (const e of this.list) first = Math.min(first, e.part.step);
+    return s.step < first;
   }
 
   private countCurrent() {
@@ -743,7 +831,13 @@ export class ViewerEngine {
   /** Smoothly frame the model (or snap). Keeps the current viewing direction unless a view was requested. */
   private fit(snap: boolean, exploded = this.state.exploded) {
     _box.makeEmpty();
+    const cutting = !exploded && this.isCutting();
     for (const e of this.list) {
+      if (cutting) {
+        _box.expandByPoint(_v2.copy(e.cutPos).add(e.cutExt.min));
+        _box.expandByPoint(_v2.copy(e.cutPos).add(e.cutExt.max));
+        continue;
+      }
       const k = exploded ? 1 : 0;
       _v.copy(e.home).addScaledVector(e.explode, k);
       _box.expandByPoint(_v2.copy(_v).add(e.ext.min));
@@ -893,6 +987,12 @@ export class ViewerEngine {
     const pulse = 0.5 + 0.5 * Math.sin(now * 5);
     const sel = s.selectedId;
 
+    // Cutting loop: pieces are marked and cut out one after another, then the loop restarts.
+    const cutting = this.isCutting();
+    const cutCycle = WAIT + CUT_EACH * this.list.length + CUT_MARK + HOLD;
+    const tcCut = (now - this.stepStart) % cutCycle;
+    const cutAlpha = Math.min(clamp01(tcCut / FADE), clamp01((cutCycle - tcCut) / FADE));
+
     for (const e of this.list) {
       const p = e.part;
       const role = s.building || s.exploded ? "solid" : p.step < s.step ? "done" : p.step === s.step ? "current" : "future";
@@ -912,6 +1012,11 @@ export class ViewerEngine {
       const pop = popT >= 1 ? 1 : Math.max(easeOutBack(popT), 0.001);
       const drop = (1 - easeOutCubic(popT)) * THREE.MathUtils.clamp(this.radius * 0.18, 1.5, 6);
 
+      if (cutting) {
+        this.renderCut(e, tcCut, cutAlpha, pop, pulse, kFade, selected, hovered, dimmed);
+        continue;
+      }
+
       // Fly-in progress (1 = in place).
       let prog = 1;
       let snap = 0;
@@ -926,6 +1031,9 @@ export class ViewerEngine {
 
       const m = e.mesh;
       m.visible = true;
+      m.quaternion.copy(e.homeQuat);
+      e.ghost.position.copy(e.home);
+      e.ghost.quaternion.copy(e.homeQuat);
       m.position.copy(e.home).addScaledVector(e.explode, explode);
       if (awayT > 0) m.position.addScaledVector(_v.subVectors(e.start, e.home), awayT);
       m.position.y += drop;
@@ -998,6 +1106,78 @@ export class ViewerEngine {
     this.controls.update(dt);
     this.renderer.render(this.scene, this.camera);
     this.labels.update(this.camera, this.width, this.height);
+  }
+
+  /**
+   * One piece in the cutting step: faint outline on the mat → dashed outline pulses
+   * ("marking") → the piece appears, lifts and glows ("cut free") → rests with its label.
+   */
+  private renderCut(
+    e: Entry,
+    tc: number,
+    alpha: number,
+    pop: number,
+    pulse: number,
+    kFade: number,
+    selected: boolean,
+    hovered: boolean,
+    dimmed: boolean,
+  ) {
+    const lt = tc - WAIT - e.cutIndex * CUT_EACH;
+    const markT = clamp01(lt / CUT_MARK);
+    const isCut = lt >= CUT_MARK;
+    const cutT = clamp01((lt - CUT_MARK) / CUT_LIFT);
+    const glint = isCut && cutT < 1 ? Math.sin(cutT * Math.PI) : 0;
+
+    const m = e.mesh;
+    m.quaternion.copy(e.cutQuat);
+    m.position.copy(e.cutPos);
+    m.position.y += glint * THREE.MathUtils.clamp(this.radius * 0.06, 0.5, 2);
+    m.scale.setScalar(pop * (1 + 0.05 * glint));
+
+    let target = isCut ? (dimmed ? 0.2 : 1) : 0;
+    if (selected) target = 1;
+    e.opacity += (target - e.opacity) * Math.max(kFade, 0.35);
+    if (Math.abs(target - e.opacity) < 0.002) e.opacity = target;
+    const op = e.opacity * (selected ? 1 : alpha);
+    m.visible = op > 0.01;
+    const mat = m.material;
+    const transparent = op < 0.995;
+    if (mat.transparent !== transparent) {
+      mat.transparent = transparent;
+      mat.depthWrite = !transparent;
+      mat.needsUpdate = true;
+    }
+    mat.opacity = op;
+    m.castShadow = op > 0.6;
+
+    e.hover += ((hovered ? 1 : 0) - e.hover) * kFade;
+    mat.emissive.copy(WHITE).multiplyScalar((selected ? 0.03 + 0.04 * pulse : 0) + 0.05 * e.hover + 0.3 * glint);
+    const edgeMat = e.edges.material as LineMaterial;
+    _c.copy(e.edgeBase).lerp(WHITE, selected ? 1 : Math.max(0.55 * e.hover, glint));
+    edgeMat.color.copy(_c);
+    edgeMat.opacity = (dimmed ? 0.2 : 1) * op;
+    edgeMat.linewidth = selected ? 2.6 : 1.5;
+
+    // Cutting line on the mat: faint until its turn, pulsing while marked, then a quiet outline.
+    e.ghost.position.copy(e.cutPos);
+    e.ghost.quaternion.copy(e.cutQuat);
+    e.ghost.visible = alpha > 0.01;
+    e.ghost.material.opacity = (isCut ? 0 : 0.06 * markT) * alpha;
+    e.ghostLines.material.opacity = (lt < 0 ? 0.14 : isCut ? 0.2 : 0.45 + 0.45 * pulse) * alpha;
+    e.guide.visible = e.arrow.visible = false;
+
+    // Label the piece just cut (and the selected / hovered one) with its name and size.
+    const fresh = isCut && lt < CUT_MARK + CUT_EACH * 2.2;
+    const want = selected || hovered || (fresh && !dimmed && alpha > 0.5);
+    e.label.want = want && pop > 0.5;
+    if (want) {
+      const mode = selected ? "selected" : "full";
+      if (mode !== e.labelMode) this.setLabelMode(e, mode);
+      e.label.priority = selected ? 0 : hovered ? 0.5 : 1;
+      e.label.world.copy(m.position);
+      e.label.world.y += e.cutExt.max.y + 0.25;
+    }
   }
 
   private setLabelMode(e: Entry, mode: Entry["labelMode"]) {

@@ -61,18 +61,42 @@ export default function MakePage() {
   async function toggleAR() {
     if (ar) return stopCamera();
     setArError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setArError("このページではカメラを使えません（https か localhost で開いてください）");
+      setTimeout(() => setArError(null), 6000);
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+      } catch (first) {
+        // Some webcams reject the HD request: retry with whatever the camera offers.
+        if (first instanceof DOMException && first.name === "NotAllowedError") throw first;
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
       streamRef.current = stream;
       setAr(true);
       setExploded(false);
     } catch (e) {
-      const denied = e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
-      setArError(denied ? "カメラの使用が許可されていません" : "カメラを起動できませんでした");
-      setTimeout(() => setArError(null), 4000);
+      const name = e instanceof DOMException ? e.name : "";
+      const msg = e instanceof Error ? e.message : "";
+      console.warn("[AR] camera error", name, msg);
+      setArError(
+        name === "NotAllowedError" && /system/i.test(msg)
+          ? "Windowsの設定でカメラがオフです（設定 → プライバシーとセキュリティ → カメラ）"
+          : name === "NotAllowedError" || name === "SecurityError"
+            ? "カメラが許可されていません。アドレスバー左のアイコン → カメラ →「許可」にして再読み込みしてください"
+            : name === "NotReadableError"
+              ? "カメラを他のアプリ（Zoom・Teams・カメラアプリ等）が使用中です。閉じてからもう一度"
+              : name === "NotFoundError"
+                ? "カメラが見つかりません"
+                : "カメラを起動できませんでした",
+      );
+      setTimeout(() => setArError(null), 8000);
     }
   }
 
