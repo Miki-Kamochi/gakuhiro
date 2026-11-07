@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { BlueprintSchema, DEMO_BLUEPRINT, type Blueprint } from "@/lib/blueprint";
+import { z } from "zod";
+import { BlueprintSchema, DEMO_BLUEPRINT, PartSchema, type Blueprint } from "@/lib/blueprint";
+import { findIssues, settle } from "@/lib/geometry-check";
 
-const SYSTEM = `あなたは「BAKERU（化ける）」というアップサイクル設計士です。
+const SYSTEM = `あなたは「化けラボ」というアップサイクル設計士です。
 ユーザーは、家にあるゴミのリストや写真と、「買おうとしていた物」または生活の中の困りごとを送ってきます。
 リストや写真にあるゴミと一般的な家庭の道具だけで作れる「役に立つ物」を1つ考えてください。
 「買おうとしていた物」がある場合は、それと同じ役割を果たす物をゴミで作る設計にしてください（買わずに済むように）。
@@ -14,16 +16,46 @@ const SYSTEM = `あなたは「BAKERU（化ける）」というアップサイ�
 部品 (parts):
 - 切り出す・用意する1枚1枚を別の部品にする（例: 段ボールの前面パネルと背面パネルは別々）。
 - 各部品に、切り出すサイズ (dimensions) と作り方 (make) を具体的に書く。
-- 3Dモデルは単純な形（box, cylinder, sphere, cone, torus）の組み合わせで、単位はcm、Yが上、地面は y=0。
-- 部品は4〜12個。部品同士は接するか重なり、1つの物に見えるようにする。色は実際の素材に近づける。
-- step には、その部品を取り付ける手順の番号を入れる。
+- step には、その部品を取り付ける手順の番号を入れる。部品は5〜12個。
+
+3Dモデル（とても重要。そのまま3D表示されます）:
+- 単位はcm、Yが上、地面は y=0。完成品の中心を x=0, z=0 に置く。position は部品の「中心」。
+- 形の選び方: 切ったペットボトル・缶・コップは cup（上が開いた円筒）、トイレットペーパーの芯は tube、切った牛乳パックやふたのない箱は tray、段ボールの板は box、中身の詰まった物だけ cylinder。容器を cylinder や box で塗りつぶさない。
+- 実物の大きさを使う: 500mlペットボトル 直径6.5×高さ20、2Lペットボトル 直径10.5×高さ30、1L牛乳パック 7×7×19.5、トイレットペーパーの芯 直径4×高さ11、350ml缶 直径6.6×高さ12.2。
+- 板の厚さ: 段ボール 0.5、牛乳パック 0.1、ペットボトルの壁 0.1（cup・tube の size.z）。
+- 置き方の計算: 地面に置く部品は position.y = size.y / 2。上に載せる部品は position.y = 下の部品の上面 + 自分の高さ / 2。回転していない cylinder・cup・tube は縦向き（高さがY方向）。横に寝かせるときは rotation.z = 90。
+- 箱を板で組むとき: 前後の板は外寸の幅いっぱい、左右の板は前後の板の内側にはまる長さ（外寸 − 板の厚さ×2）。角で板同士がめり込まないように、厚さの分だけ位置をずらす。
+- 中身（土・水・ペン・ひも）は容器の内側の寸法に収める（容器の外にはみ出さない）。
+- 部品同士は面で接するように置き、すき間（浮いている部品）も、大きなめり込みも作らない。
+- 出力前に各部品について確認する: 下端 (position.y − 高さ/2) が 0 か、下の部品の上端と一致しているか。隣の部品と体積の大部分が重なっていないか。
+- 色は実際の素材に近づける（段ボール #c69a6a、ペットボトル #cfe8f5、牛乳パック #f4f1ea、缶 #b9bec4、芯 #d9c4a3）。
 
 手順 (steps):
 - 3〜5手順。前半で素材を切り出す・準備する手順を入れる。
 - 各手順の actions には、寸法・位置・道具を含めた具体的な作業を2〜4個、短く書く。
 - 安全に作れるように注意点を書く。
 
-速さが大切です。考えすぎず、文章は短く簡潔に。`;
+文章は短く簡潔に。考える時間は、3Dモデルの寸法と位置を正確にすることに使ってください。`;
+
+/** Second, faster pass: fix only the coordinates of a model whose geometry check failed. */
+const REPAIR_SYSTEM = `あなたは3Dモデルの寸法チェック担当です。アップサイクル作品の3Dモデル（部品の形・寸法・位置・回転）と、自動チェックで見つかった問題点が渡されます。
+問題点がすべて解消されるように、部品の shape・size・position・rotation を直してください。
+- 単位はcm、Yが上、地面は y=0。position は部品の中心。地面に置く部品は position.y = size.y/2、上に載せる部品は 下の部品の上端 + 自分の高さ/2。
+- 部品同士は面で接するように置き、宙に浮かせない。容器（cup・tube・tray）の中身は容器の内側に収める。
+- 板で箱を組むときは、左右の板を前後の板の内側に入れ、角でめり込ませない。
+- 作品のデザイン・部品の数・大きさの比率はできるだけ変えない。問題のない部品はそのまま返す。
+- すべての部品を id 付きで返す。`;
+
+const RepairSchema = z.object({
+  parts: z.array(
+    PartSchema.pick({ id: true, shape: true, size: true, position: true, rotation: true }),
+  ),
+});
+
+/** Hard ceiling for the whole request, so the build always appears within two minutes. */
+const TOTAL_BUDGET_MS = 115_000;
+/** A repair pass is only worth starting if this much time is left. */
+const REPAIR_MIN_MS = 25_000;
 
 const MEDIA_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 type MediaType = (typeof MEDIA_TYPES)[number];
@@ -114,7 +146,7 @@ function streamResponse(run: (send: Send) => Promise<void>) {
 
 /** Model and speed knobs, so the team can trade quality for latency without code changes. */
 const MODEL = process.env.BAKERU_MODEL || "claude-opus-5-5";
-const EFFORT = (process.env.BAKERU_EFFORT || "low") as "low" | "medium" | "high";
+const EFFORT = (process.env.BAKERU_EFFORT || "medium") as "low" | "medium" | "high";
 /** Fast mode (Claude Opus only, research preview, premium price): BAKERU_FAST=1. */
 const FAST = process.env.BAKERU_FAST === "1";
 
@@ -188,7 +220,61 @@ async function streamClaude(send: Send, content: Content) {
   if (!result.success) {
     return send({ t: "e", error: "AIの出力が不完全でした。もう一度お試しください。" });
   }
-  send({ t: "final", blueprint: result.data, demo: false, ms });
+
+  const blueprint = await polishGeometry(client, result.data, started);
+  send({ t: "final", blueprint, demo: false, ms: Date.now() - started });
+}
+
+/**
+ * Check the model for overlaps / floating parts. If there are problems and
+ * time left, ask for a quick coordinate-only repair; then always settle the
+ * model onto the ground. Never throws: on any failure the original is used.
+ */
+async function polishGeometry(client: Anthropic, bp: Blueprint, started: number): Promise<Blueprint> {
+  let parts = bp.parts;
+  // Floating parts alone don't need the AI: settle() drops them into place.
+  const issues = findIssues(parts);
+  const left = TOTAL_BUDGET_MS - (Date.now() - started);
+  let repaired = false;
+
+  if (issues.some((i) => i.kind !== "floating") && left > REPAIR_MIN_MS) {
+    const t0 = Date.now();
+    try {
+      const model = parts.map(({ id, name, shape, size, position, rotation }) => ({ id, name, shape, size, position, rotation }));
+      const response = await client.beta.messages.parse(
+        {
+          model: MODEL,
+          max_tokens: 6000,
+          output_config: { effort: "low", format: betaZodOutputFormat(RepairSchema) },
+          system: REPAIR_SYSTEM,
+          messages: [
+            {
+              role: "user",
+              content: `作品: ${bp.title}\n\n部品:\n${JSON.stringify(model)}\n\n問題点:\n${issues.map((i) => `- ${i.text}`).join("\n")}`,
+            },
+          ],
+        },
+        { timeout: left - 3000, maxRetries: 0 },
+      );
+      const fixes = new Map((response.parsed_output?.parts ?? []).map((p) => [p.id, p]));
+      const candidate = parts.map((p) => {
+        const f = fixes.get(p.id);
+        return f ? { ...p, shape: f.shape, size: f.size, position: f.position, rotation: f.rotation } : p;
+      });
+      // Keep the repair only if it actually reduced the problems.
+      if (findIssues(candidate).length < issues.length) {
+        parts = candidate;
+        repaired = true;
+      }
+    } catch (error) {
+      console.warn("[transform] repair skipped:", error instanceof Error ? error.message : error);
+    }
+    console.log(`[transform] repair ${repaired ? "applied" : "discarded"} in ${Date.now() - t0}ms (${issues.length} issues)`);
+  }
+
+  parts = settle(parts);
+  console.log(`[transform] geometry: ${issues.length} issues before, ${findIssues(parts).length} after`);
+  return { ...bp, parts };
 }
 
 /** Without an API key: replay the demo blueprint as a fake stream so the UI looks the same. */

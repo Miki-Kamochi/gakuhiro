@@ -5,9 +5,13 @@ const Vec3 = z.object({ x: z.number(), y: z.number(), z: z.number() });
 export const PartSchema = z.object({
   id: z.string(),
   name: z.string().describe("部品名（日本語）。例: 前面パネル"),
-  shape: z.enum(["box", "cylinder", "sphere", "cone", "torus"]),
+  shape: z
+    .enum(["box", "cylinder", "sphere", "cone", "torus", "cup", "tube", "tray"])
+    .describe(
+      "box=板・角材, cylinder=中身の詰まった円柱, cup=上が開いた円筒（切ったペットボトル・缶）, tube=両端が開いた筒（トイレットペーパーの芯）, tray=上が開いた箱（切った牛乳パック・段ボール箱）, cone, sphere, torus",
+    ),
   size: Vec3.describe(
-    "寸法(cm)。box: 幅/高さ/奥行き。cylinder・cone: x=直径, y=高さ。sphere: x=直径。torus: x=外径, y=太さ。",
+    "寸法(cm)。box・tray: x=幅, y=高さ, z=奥行き。cylinder・cone: x=直径, y=高さ。cup・tube: x=外径, y=高さ, z=壁の厚さ。sphere: x=直径。torus: x=外径, y=太さ。",
   ),
   position: Vec3.describe("完成時の部品の中心(cm)。Yが上、地面は y=0。"),
   rotation: Vec3.describe("オイラー回転（度）"),

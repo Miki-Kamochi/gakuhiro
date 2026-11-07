@@ -1,4 +1,4 @@
-# BAKERU — 化ける
+# 化けラボ (BAKE LAB)
 
 **いらないものが、使えるものに化ける。** Turn trash into something useful.
 

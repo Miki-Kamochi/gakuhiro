@@ -82,12 +82,54 @@ async function dummyCatalog(): Promise<(Product & { haystack: string })[]> {
     }));
 }
 
+/**
+ * Shop order for the demo. Things that turn into an impressive, easy build from
+ * household trash come first (in this order); things that are hard or odd to
+ * make from trash (knives, balls, leather bags…) sink to the bottom.
+ */
+const SHOWCASE = [
+  "Plant Pot",
+  "Mug Tree Stand",
+  "Spice Rack",
+  "Table Lamp",
+  "Lunch Box",
+  "Tray",
+  "Family Tree Photo Frame",
+  "Monopod",
+  "Basketball Rim",
+  "House Showpiece Plant",
+  "Ice Cube Tray",
+  "Selfie Lamp with iPhone",
+];
+const BUILDABLE = new Set([
+  "Decoration Swing",
+  "Selfie Stick Monopod",
+  "Cricket Wicket",
+  "Chopping Board",
+  "Plate",
+  "Black Aluminium Cup",
+  "Glass",
+  "Kitchen Sieve",
+  "Fine Mesh Strainer",
+  "Feather Shuttlecock",
+  "Party Glasses",
+  "Women Handbag Black",
+  "Blue Women's Handbag",
+]);
+
+function demoRank(name: string): number {
+  const i = SHOWCASE.indexOf(name);
+  if (i >= 0) return i;
+  return BUILDABLE.has(name) ? 100 : 200;
+}
+
 async function searchDummy(query: string, category: string): Promise<Product[]> {
   const all = await dummyCatalog();
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   return all
     .filter((p) => !category || p.category === category)
     .filter((p) => words.every((w) => p.haystack.includes(w)))
+    .sort((a, b) => demoRank(a.name) - demoRank(b.name))
     .map(({ id, name, category: c, price, image, shop, rating, reviews }) => ({
       id,
       name,

@@ -42,6 +42,8 @@ export default function MakePage() {
   /** Seconds since generation started (live), and the final time. */
   const [elapsed, setElapsed] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [tab, setTab] = useState<"steps" | "parts" | "info">("steps");
   const fileInput = useRef<HTMLInputElement>(null);
   const outputRef = useRef<HTMLElement>(null);
 
@@ -70,7 +72,7 @@ export default function MakePage() {
       }
       if (cached?.blueprint) {
         setResult(cached);
-        setStep(cached.blueprint.steps.length + 1);
+        setStep(1);
       } else if (req) run(req);
     });
     return () => clearTimeout(id);
@@ -146,7 +148,10 @@ export default function MakePage() {
             /* storage full: the result just won't survive a reload */
           }
           setElapsed(ev.ms / 1000);
-          setStep(ev.blueprint.steps.length + 1);
+          // Show the finished model for a moment, then rewind to step 1 so the build starts from the beginning.
+          const done = ev.blueprint.steps.length + 1;
+          setStep(done);
+          setTimeout(() => setStep((s) => (s === done ? 1 : s)), 2500);
           break;
         }
         if (ev.t !== "d") continue;
@@ -159,7 +164,7 @@ export default function MakePage() {
         setResult({ blueprint: preview, demo: false });
         if (!scrolled) {
           scrolled = true;
-          setTimeout(() => outputRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+          setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
         }
       }
       if (!final) throw new Error("接続が途切れました。もう一度お試しください。");
@@ -231,7 +236,7 @@ export default function MakePage() {
         [`${i + 1}. ${s.title}`, ...s.actions.map((a) => `   - ${a}`), s.caution ? `   ⚠ ${s.caution}` : ""].filter(Boolean),
       ),
       "",
-      "BAKERU — いらないものが、使えるものに化ける。",
+      "化けラボ — いらないものが、使えるものに化ける。",
     ].join("\n");
     try {
       await navigator.clipboard.writeText(text);
@@ -256,18 +261,19 @@ export default function MakePage() {
       <header className="sticky top-0 z-20 border-b border-line/70 bg-paper/80 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
           <Link href="/" className="text-sm font-medium tracking-[0.35em]">
-            BAKERU <span className="font-brush ml-1 text-base tracking-[0.2em] text-accent">化ける</span>
+            <span className="font-brush text-lg tracking-[0.15em]">化けラボ</span>
           </Link>
           <nav className="flex gap-6 text-xs tracking-[0.2em] text-ink/60 sm:gap-8">
-            <a href="#input" className="transition hover:text-ink">入力</a>
-            <a href="#output" className="transition hover:text-ink">結果</a>
+            {!bp && <a href="#input" className="transition hover:text-ink">入力</a>}
             <Link href="/" className="transition hover:text-ink">ショップ</Link>
           </nav>
         </div>
       </header>
 
+      {!bp && (
       <main className="relative mx-auto max-w-7xl px-6">
         {/* Motto */}
+        {!request && (
         <section className="pb-10 pt-12">
           <p className="mb-4 text-xs tracking-[0.3em] text-ink/50">テーマ — 化ける / TRANSFORM</p>
           <h1 className="font-brush text-4xl leading-tight sm:text-6xl">
@@ -277,66 +283,42 @@ export default function MakePage() {
             いらない物の写真と、困っていることを入れてください。AIが素材を見分けて、役に立つ物に変身させます。部品の切り出し方から組み立てまで、3Dで手順を案内します。
           </p>
         </section>
+        )}
 
         {/* Input */}
-        <section id="input" className="scroll-mt-20 pb-20">
-          {wanted && (
-            <div className="mb-5 flex items-center gap-4 rounded-lg border border-line bg-panel p-4">
-              {wanted.img && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={wanted.img} alt="" className="h-14 w-14 shrink-0 rounded-xl bg-white object-contain p-1" />
-              )}
-              <div className="min-w-0">
-                <p className="text-xs tracking-[0.25em] text-ink/50">買おうとしていたもの</p>
-                <p className="mt-1 truncate">{wanted.name}</p>
-              </div>
-              <p className="ml-auto shrink-0 text-sm">
-                <span className="text-ink/40 line-through">¥{wanted.price.toLocaleString("ja-JP")}</span>
-                <span className="ml-3 text-lg text-accent">¥0</span>
-              </p>
-            </div>
-          )}
-
+        <section id="input" className={request ? "" : "scroll-mt-20 pb-20"}>
           {request && (
-            <div className="rounded-lg border border-line bg-panel p-5">
-              <Label n="01" text="使うゴミ" />
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-                {request.trash.map((t) => (
-                  <span key={t} className="rounded-full border border-line bg-paper px-3 py-1">
-                    {t}
-                  </span>
-                ))}
-                {request.extra && (
-                  <span className="rounded-full border border-line bg-paper px-3 py-1">{request.extra}</span>
-                )}
-                {request.photo && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={request.photo.url} alt="追加したゴミの写真" className="h-12 w-12 rounded-lg object-cover" />
-                )}
-              </div>
+            <div className="flex min-h-[calc(100dvh-3.5rem)] items-center justify-center py-12">
+              <div className="w-full max-w-md text-center">
+                <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+                  {request.trash.map((t) => (
+                    <span key={t} className="rounded-full border border-line bg-panel px-3 py-1">
+                      {t}
+                    </span>
+                  ))}
+                  {request.extra && <span className="rounded-full border border-line bg-panel px-3 py-1">{request.extra}</span>}
+                  {request.photo && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={request.photo.url} alt="追加したゴミの写真" className="h-9 w-9 rounded-lg object-cover" />
+                  )}
+                </div>
 
-              <div className="mt-6 flex items-center gap-4 rounded-xl bg-paper p-4">
-                {loading ? (
-                  <>
-                    <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-line border-t-accent" />
-                    <span className="flex-1 text-base">{LOADING_LINES[loadingLine]}…</span>
-                    <span className="font-mono text-sm tabular-nums text-ink/50">{elapsed.toFixed(1)}秒</span>
-                  </>
-                ) : error ? (
-                  <>
-                    <span className="flex-1 text-sm text-accent">{error}</span>
+                {error ? (
+                  <div className="mt-10">
+                    <p className="text-sm text-ink/70">{error}</p>
                     <button
                       onClick={() => run(request)}
-                      className="shrink-0 rounded-full bg-accent px-5 py-2 text-sm text-paper transition hover:bg-accent/85"
+                      className="mt-5 rounded-full bg-accent px-6 py-2.5 text-sm text-paper transition hover:bg-accent/85"
                     >
                       もう一度
                     </button>
-                  </>
+                  </div>
                 ) : (
-                  <>
-                    <span className="text-base text-accent">化けました ↓</span>
-                    <span className="ml-auto font-mono text-sm tabular-nums text-ink/50">{elapsed.toFixed(1)}秒</span>
-                  </>
+                  <div className="mt-10 flex flex-col items-center">
+                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-accent" />
+                    <p className="mt-5 text-base">{LOADING_LINES[loadingLine]}…</p>
+                    <p className="mt-1 font-mono text-xs tabular-nums text-ink/40">{elapsed.toFixed(1)}秒</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -442,298 +424,313 @@ export default function MakePage() {
           )}
         </section>
 
-        {/* Output */}
+        {/* Output placeholder (before a design exists) */}
+        {!request && (
         <section id="output" ref={outputRef} className="scroll-mt-16 border-t border-line pb-24 pt-16">
-          <div className="mb-10 flex items-baseline gap-5">
-            <span className="font-mono text-xs text-ink/45">03</span>
-            <h2 className="text-2xl font-light tracking-tight sm:text-3xl">変身結果</h2>
+          <div className="flex aspect-[21/9] items-center justify-center rounded-lg border border-dashed border-dim/50 text-sm text-ink/45">
+            ここに3Dの設計図と作り方が表示されます
           </div>
+        </section>
+        )}
+      </main>
+      )}
 
-          {!bp ? (
-            <div className="flex aspect-[21/9] items-center justify-center rounded-lg border border-dashed border-dim/50 text-sm text-ink/45">
-              ここに3Dの設計図と作り方が表示されます
-            </div>
-          ) : (
-            <>
+      {/* Studio: the 3D model fills the screen, everything else floats on top of it. */}
+      {bp && (
+        <section
+          ref={outputRef}
+          className="relative lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden"
+        >
+          {/* Viewer */}
+          <div
+            className={`relative h-[68vh] min-h-[420px] lg:absolute lg:inset-y-0 lg:right-0 lg:h-auto lg:transition-[left] lg:duration-300 ${
+              panelOpen ? "lg:left-[372px]" : "lg:left-0"
+            }`}
+          >
+            <Viewer3D
+              parts={bp.parts}
+              step={building ? 999 : step}
+              exploded={exploded}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              building={building}
+            />
+
+            {/* Top right: view mode + actions */}
+            <div className="absolute right-3 top-3 flex flex-wrap items-center justify-end gap-2">
               {result?.demo && (
-                <p className="mb-6 inline-block rounded-full bg-line/60 px-4 py-1.5 text-xs text-ink/70">
-                  デモモード：ANTHROPIC_API_KEY を設定すると、あなたの写真をAIが解析します
-                </p>
+                <span className="hidden rounded-full border border-white/10 bg-[#0a0a0a]/80 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur md:inline">
+                  デモモード
+                </span>
               )}
-
-              {/* Title */}
-              <div className="mb-10 grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
-                <div>
-                  <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
-                    {bp.detected.items.map((it) => (
-                      <span key={it} className="rounded-full border border-line bg-panel px-3 py-1 text-ink/70">
-                        {it}
-                      </span>
-                    ))}
-                    <span className="text-accent">→ 化けると</span>
-                  </div>
-                  <h3 className="font-brush text-4xl leading-tight sm:text-6xl">{bp.title}</h3>
-                  <p className="mt-4 max-w-2xl text-lg font-light text-ink/70">{bp.tagline}</p>
-                  {!building && (
-                    <div className="mt-6 flex flex-wrap gap-2 text-sm">
-                      <button
-                        onClick={copyInstructions}
-                        className="rounded-full border border-line bg-panel px-4 py-2 transition hover:border-ink"
-                      >
-                        {copied ? "コピーしました ✓" : "作り方をコピー"}
-                      </button>
-                      {(request || photo) && (
-                        <button
-                          onClick={regenerate}
-                          className="rounded-full border border-line bg-panel px-4 py-2 transition hover:border-ink"
-                        >
-                          別の案を出す ↻
-                        </button>
-                      )}
-                      <Link href="/" className="rounded-full border border-line bg-panel px-4 py-2 transition hover:border-ink">
-                        ショップに戻る
-                      </Link>
-                    </div>
+              <div className="flex overflow-hidden rounded-full border border-white/10 bg-[#0a0a0a]/85 text-xs backdrop-blur">
+                <button
+                  onClick={() => setExploded(false)}
+                  className={`px-4 py-2 transition ${!exploded ? "bg-white text-black" : "text-white/75 hover:bg-white/10"}`}
+                >
+                  組み立て
+                </button>
+                <button
+                  onClick={() => setExploded(true)}
+                  className={`px-4 py-2 transition ${exploded ? "bg-white text-black" : "text-white/75 hover:bg-white/10"}`}
+                >
+                  分解図
+                </button>
+              </div>
+              {!building && (
+                <div className="flex overflow-hidden rounded-full border border-white/10 bg-[#0a0a0a]/85 text-xs text-white/75 backdrop-blur">
+                  <button onClick={copyInstructions} className="px-3.5 py-2 transition hover:bg-white/10" title="作り方をテキストでコピー">
+                    {copied ? "コピー済 ✓" : "コピー"}
+                  </button>
+                  {(request || photo) && (
+                    <button onClick={regenerate} className="border-l border-white/10 px-3.5 py-2 transition hover:bg-white/10" title="別の案を出す">
+                      別の案 ↻
+                    </button>
                   )}
                 </div>
-                <dl className="grid grid-cols-3 overflow-hidden rounded-lg border border-line bg-panel">
-                  <Stat label="難易度" value={bp.difficulty ? `${Math.min(5, Math.max(1, Math.round(bp.difficulty)))}/5` : "…"} />
-                  <Stat label="所要時間" value={bp.time_minutes ? `${Math.round(bp.time_minutes)}分` : "…"} />
-                  <Stat label="CO₂削減" value={bp.co2_saved_g ? `${Math.round(bp.co2_saved_g).toLocaleString("ja-JP")}g` : "…"} />
-                </dl>
+              )}
+            </div>
+
+            {/* Panel toggle when collapsed (desktop) */}
+            {!panelOpen && (
+              <button
+                onClick={() => setPanelOpen(true)}
+                title="パネルを開く"
+                className="absolute left-3 top-3 hidden max-w-[40%] items-center gap-3 rounded-full border border-white/10 bg-[#0a0a0a]/85 py-2 pl-4 pr-3 text-white/80 backdrop-blur transition hover:border-white/30 hover:text-white lg:flex"
+              >
+                <span className="font-brush truncate text-base">{bp.title}</span>
+                <span className="text-white/45">→</span>
+              </button>
+            )}
+
+            {/* Current step, compact (desktop, panel closed) */}
+            {!panelOpen && !building && current && (
+              <div className="absolute bottom-20 left-3 hidden w-80 rounded-2xl border border-white/10 bg-[#0a0a0a]/85 p-4 backdrop-blur lg:block">
+                <p className="text-sm font-medium">
+                  <span className="mr-2 font-mono text-white/40">{String(step).padStart(2, "0")}</span>
+                  {current.title}
+                </p>
+                <ol className="mt-2.5 space-y-1.5">
+                  {current.actions.map((a, i) => (
+                    <li key={i} className="flex gap-2 text-xs leading-relaxed text-white/80">
+                      <span className="text-white/35">{i + 1}.</span>
+                      <span>{a}</span>
+                    </li>
+                  ))}
+                </ol>
+                {current.caution && <p className="mt-2.5 text-xs text-amber-200/90">⚠ {current.caution}</p>}
               </div>
+            )}
 
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-                {/* Viewer */}
-                <div className="lg:sticky lg:top-20 lg:self-start">
-                  <div className="viewer-bg relative h-[60vh] min-h-[420px] overflow-hidden rounded-lg border border-line lg:h-[calc(100vh-7rem)]">
-                    <Viewer3D
-                      parts={bp.parts}
-                      step={building ? 999 : step}
-                      exploded={exploded}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
-                      building={building}
-                    />
-                    <div className="pointer-events-none absolute left-5 top-5 max-w-[60%]">
-                      <p className="text-xs tracking-[0.25em] text-ink/55">
-                        {building ? "AIが設計中" : finished ? "完成" : `STEP ${step} / ${total}`}
-                      </p>
-                      <p className="mt-1 text-lg font-light">{building ? `部品 ${bp.parts.length} 個` : finished ? "化けた！" : current?.title}</p>
-                    </div>
-                    <div className="absolute right-5 top-5 flex overflow-hidden rounded-full border border-line bg-panel text-xs">
-                      <button
-                        onClick={() => setExploded(false)}
-                        className={`px-4 py-2 transition ${!exploded ? "bg-ink text-paper" : "hover:bg-line/50"}`}
-                      >
-                        組み立て
-                      </button>
-                      <button
-                        onClick={() => setExploded(true)}
-                        className={`px-4 py-2 transition ${exploded ? "bg-ink text-paper" : "hover:bg-line/50"}`}
-                      >
-                        分解図
-                      </button>
-                    </div>
-
-                    {selected && (
-                      <div className="absolute bottom-20 left-5 right-5 max-w-sm rounded-xl border border-accent/30 bg-panel/90 p-4 backdrop-blur">
-                        <div className="flex items-start justify-between gap-4">
-                          <p className="font-medium text-accent">{selected.name}</p>
-                          <button onClick={() => setSelectedId(null)} className="text-ink/45 hover:text-ink" aria-label="閉じる">
-                            ×
-                          </button>
-                        </div>
-                        <p className="mt-1 text-sm text-ink/70">
-                          {selected.source} ・ {selected.dimensions}
-                        </p>
-                        <p className="mt-2 text-sm font-light leading-relaxed">{selected.make}</p>
-                      </div>
-                    )}
-
-                    {!building && (
-                    <div className="absolute inset-x-5 bottom-5 flex items-center gap-3">
-                      <RoundBtn onClick={() => goToStep(Math.max(1, step - 1))} label="前の手順">←</RoundBtn>
-                      <div className="flex flex-1 gap-1">
-                        {Array.from({ length: total + 1 }, (_, i) => (
-                          <button
-                            key={i}
-                            onClick={() => goToStep(i + 1)}
-                            aria-label={i === total ? "完成" : `手順 ${i + 1}`}
-                            className={`h-1 flex-1 rounded-full transition ${i + 1 <= step ? "bg-accent" : "bg-ink/15"}`}
-                          />
-                        ))}
-                      </div>
-                      <RoundBtn onClick={() => goToStep(Math.min(total + 1, step + 1))} label="次の手順">→</RoundBtn>
-                    </div>
-                    )}
-                  </div>
-                  <p className="mt-3 text-xs text-ink/50">
-                    ドラッグで回転・スクロールで拡大・← → キーで手順を移動。部品をクリックすると作り方が表示されます。
+            {/* Selected part */}
+            {selected && (
+              <div className="absolute right-[76px] top-16 w-[min(18rem,calc(100%-6rem))] rounded-2xl border border-white/15 bg-[#0a0a0a]/90 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.6)] backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <p className="flex items-center gap-2 font-medium">
+                    <span className="h-3 w-3 rounded-sm border border-white/20" style={{ background: selected.color }} />
+                    {selected.name}
                   </p>
+                  <button onClick={() => setSelectedId(null)} className="text-white/45 hover:text-white" aria-label="閉じる">
+                    ×
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-white/55">
+                  {selected.source} ・ {selected.dimensions} ・ 手順{selected.step}
+                </p>
+                <p className="mt-3 text-sm font-light leading-relaxed text-white/85">{selected.make}</p>
+              </div>
+            )}
+
+            {/* Bottom: step scrubber */}
+            {!building && (
+              <div
+                className="absolute bottom-3 left-3 right-3 flex items-center gap-2 rounded-full border border-white/10 bg-[#0a0a0a]/85 p-1 backdrop-blur sm:left-1/2 sm:right-auto sm:w-[min(26rem,calc(100%-2rem))] sm:-translate-x-1/2"
+              >
+                <RoundBtn onClick={() => goToStep(step - 1)} label="前の手順">←</RoundBtn>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-center text-xs text-white/85">
+                    <span className="mr-2 font-mono text-white/45">{finished ? "完成" : `${step}/${total}`}</span>
+                    {finished ? "化けた！" : current?.title}
+                  </p>
+                  <div className="mt-1.5 flex gap-1">
+                    {Array.from({ length: total + 1 }, (_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => goToStep(i + 1)}
+                        aria-label={i === total ? "完成" : `手順 ${i + 1}`}
+                        title={i === total ? "完成" : `${i + 1}. ${bp.steps[i]?.title ?? ""}`}
+                        className={`h-1.5 flex-1 rounded-full transition ${
+                          i + 1 === step ? "bg-white" : i + 1 < step ? "bg-white/55" : "bg-white/15 hover:bg-white/30"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <RoundBtn onClick={() => goToStep(step + 1)} label="次の手順">→</RoundBtn>
+              </div>
+            )}
+          </div>
+
+          {/* Floating side panel (desktop) / stacked below (mobile) */}
+          {panelOpen && (
+            <aside className="relative flex flex-col border-t border-white/10 bg-[#0a0a0a] [color-scheme:dark] lg:absolute lg:bottom-0 lg:left-0 lg:top-0 lg:w-[372px] lg:border-r lg:border-t-0">
+              {/* Header */}
+              <div className="border-b border-white/10 px-5 pb-4 pt-5">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="font-brush line-clamp-2 text-2xl leading-snug" title={bp.tagline}>{bp.title}</h1>
+                  </div>
+                  <button
+                    onClick={() => setPanelOpen(false)}
+                    className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full text-white/40 transition hover:bg-white/10 hover:text-white lg:flex"
+                    aria-label="パネルを閉じる"
+                    title="パネルを閉じて3Dを広く見る"
+                  >
+                    ←
+                  </button>
                 </div>
 
-                {/* Detail column */}
-                <div className="flex flex-col gap-6">
-                  <div className="rounded-lg bg-accent p-6 text-paper">
-                    <p className="text-xs tracking-[0.25em] text-paper/60">解決すること</p>
-                    <p className="mt-3 font-light leading-relaxed">{bp.problem_solved}</p>
-                  </div>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-white/50">
+                  {wanted && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="line-through">¥{wanted.price.toLocaleString("ja-JP")}</span>
+                      <span className="text-sm font-medium text-white">¥0</span>
+                    </span>
+                  )}
+                  {bp.time_minutes > 0 && <span className="text-white">{Math.round(bp.time_minutes)}分</span>}
+                  {bp.difficulty > 0 && (
+                    <span className="tracking-[0.1em]" title="難易度">
+                      <span className="text-white">{"★".repeat(Math.min(5, Math.max(1, Math.round(bp.difficulty))))}</span>
+                      {"★".repeat(5 - Math.min(5, Math.max(1, Math.round(bp.difficulty))))}
+                    </span>
+                  )}
+                  {bp.co2_saved_g > 0 && <span>CO₂ -{Math.round(bp.co2_saved_g).toLocaleString("ja-JP")}g</span>}
+                </div>
+              </div>
 
-                  {/* Current step */}
-                  {current ? (
-                    <div className="rounded-lg border border-line bg-panel p-6">
-                      <div className="flex items-baseline gap-4">
-                        <span className="font-mono text-4xl font-light text-accent">{String(step).padStart(2, "0")}</span>
-                        <div>
-                          <h4 className="text-xl font-medium">{current.title}</h4>
-                          <p className="mt-1 text-sm font-light text-ink/65">{current.summary}</p>
+              {/* Tabs */}
+              <div className="flex border-b border-white/10 px-2 text-sm">
+                {(
+                  [
+                    ["steps", "手順"],
+                    ["parts", "部品"],
+                    ["info", "道具"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setTab(id)}
+                    className={`relative flex-1 px-2 py-2.5 text-[13px] transition ${tab === id ? "text-white" : "text-white/45 hover:text-white/75"}`}
+                  >
+                    {label}
+                    {tab === id && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-white" />}
+                  </button>
+                ))}
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 [scrollbar-color:rgba(255,255,255,0.18)_transparent] [scrollbar-width:thin]">
+                {tab === "steps" && (
+                  <>
+                    {building ? (
+                      <div className="rounded-xl border border-white/10 p-4">
+                        <div className="flex items-center gap-3">
+                          <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/15 border-t-white" />
+                          <p className="font-medium">設計中…</p>
+                          <span className="ml-auto font-mono text-xs tabular-nums text-white/50">{elapsed.toFixed(1)}秒</span>
                         </div>
                       </div>
-                      <ol className="mt-6 space-y-3">
-                        {current.actions.map((a, i) => (
-                          <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
-                            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-line text-xs font-medium">
-                              {i + 1}
-                            </span>
-                            <span>{a}</span>
-                          </li>
-                        ))}
-                      </ol>
-
-                      {bp.parts.some((p) => p.step === step) && (
-                        <div className="mt-6">
-                          <p className="text-xs tracking-[0.2em] text-ink/55">この手順で使う部品</p>
-                          <div className="mt-2 flex flex-wrap gap-2">
+                    ) : current ? (
+                      <div>
+                        <div className="flex items-baseline gap-3">
+                          <span className="font-mono text-3xl font-light">{String(step).padStart(2, "0")}</span>
+                          <div className="min-w-0">
+                            <h2 className="text-lg font-medium leading-snug">{current.title}</h2>
+                          </div>
+                        </div>
+                        <ol className="mt-4 space-y-2.5">
+                          {current.actions.map((a, i) => (
+                            <li key={i} className="flex gap-3 text-sm leading-relaxed">
+                              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-[11px]">
+                                {i + 1}
+                              </span>
+                              <span>{a}</span>
+                            </li>
+                          ))}
+                        </ol>
+                        {bp.parts.some((p) => p.step === step) && (
+                          <div className="mt-4 flex flex-wrap gap-1.5">
                             {bp.parts
                               .filter((p) => p.step === step)
                               .map((p) => (
                                 <button
                                   key={p.id}
                                   onClick={() => selectPart(p)}
-                                  className={`rounded-full border px-3 py-1 text-sm transition ${
-                                    selectedId === p.id
-                                      ? "border-accent bg-accent text-paper"
-                                      : "border-line bg-paper hover:border-dim"
+                                  className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                                    selectedId === p.id ? "border-white bg-white text-black" : "border-white/15 hover:border-white/40"
                                   }`}
                                 >
                                   {p.name}
-                                  <span className="ml-2 text-xs opacity-60">{p.dimensions}</span>
                                 </button>
                               ))}
                           </div>
-                        </div>
-                      )}
-
-                      {(current.tip || current.caution) && (
-                        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                          {current.tip && (
-                            <div className="rounded-xl bg-dim/20 p-4 text-sm leading-relaxed">
-                              <p className="mb-1 text-xs font-medium tracking-[0.2em] text-dim">コツ</p>
-                              {current.tip}
-                            </div>
-                          )}
-                          {current.caution && (
-                            <div className="rounded-xl bg-accent/15 p-4 text-sm leading-relaxed">
-                              <p className="mb-1 text-xs font-medium tracking-[0.2em] text-accent">注意</p>
-                              {current.caution}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="mt-6 flex justify-between">
+                        )}
+                        {current.caution && <p className="mt-4 text-xs leading-relaxed text-amber-200/90">⚠ {current.caution}</p>}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-white/10 p-4">
+                        <p className="font-medium">完成！</p>
                         <button
-                          onClick={() => goToStep(Math.max(1, step - 1))}
-                          disabled={step === 1}
-                          className="text-sm text-ink/60 hover:text-ink disabled:invisible"
+                          onClick={() => goToStep(1)}
+                          className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-medium text-black transition hover:bg-white/85"
                         >
-                          ← 前へ
-                        </button>
-                        <button
-                          onClick={() => goToStep(step + 1)}
-                          className="rounded-full bg-ink px-5 py-2 text-sm text-paper transition hover:bg-ink/85"
-                        >
-                          {step === total ? "完成を見る →" : "次の手順 →"}
+                          最初から見る →
                         </button>
                       </div>
-                    </div>
-                  ) : building ? (
-                    <div className="rounded-lg border border-line bg-panel p-6">
-                      <div className="flex items-center gap-3">
-                        <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-line border-t-accent" />
-                        <p className="text-xl font-medium">AIが設計図を書いています</p>
-                        <span className="ml-auto font-mono text-sm tabular-nums text-ink/50">{elapsed.toFixed(1)}秒</span>
-                      </div>
-                      <p className="mt-3 text-sm leading-relaxed text-ink/65">
-                        部品 {bp.parts.length} 個 ・ 手順 {bp.steps.length} 個 — 届いた部品から3Dに組み上がっていきます。
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-line bg-panel p-6">
-                      <p className="text-xl font-medium">完成！</p>
-                      <p className="mt-2 text-sm font-light leading-relaxed text-ink/70">
-                        「分解図」で全部品の位置関係を確認できます。部品をクリックすると、その作り方が表示されます。
-                      </p>
-                      <button
-                        onClick={() => goToStep(1)}
-                        className="mt-4 rounded-full bg-ink px-5 py-2 text-sm text-paper transition hover:bg-ink/85"
-                      >
-                        手順1から作り方を見る →
-                      </button>
-                    </div>
-                  )}
+                    )}
 
-                  {/* All steps */}
-                  <div className="overflow-hidden rounded-lg border border-line bg-panel">
-                    <p className="border-b border-line px-6 py-4 text-xs tracking-[0.25em] text-ink/55">手順一覧</p>
-                    <ol>
-                      {bp.steps.map((s, i) => (
+                    <ol className="mt-5 border-t border-white/10 pt-3">
+                      {bp.steps.map((st, i) => (
                         <li key={i}>
                           <button
                             onClick={() => goToStep(i + 1)}
-                            className={`flex w-full items-baseline gap-4 border-b border-line/60 px-6 py-3 text-left transition last:border-b-0 ${
-                              step === i + 1 ? "bg-line/45" : "hover:bg-line/20"
-                            }`}
+                            disabled={building}
+                            className={`flex w-full items-baseline gap-3 rounded-lg px-2 py-2 text-left text-sm transition ${
+                              !building && step === i + 1 ? "bg-white/10" : "hover:bg-white/[0.05]"
+                            } ${!building && i + 1 < step ? "text-white/45" : ""}`}
                           >
-                            <span className={`font-mono text-xs ${step === i + 1 ? "text-accent" : "text-ink/40"}`}>
-                              {String(i + 1).padStart(2, "0")}
-                            </span>
-                            <span className="text-sm">{s.title}</span>
+                            <span className="font-mono text-[11px] text-white/40">{String(i + 1).padStart(2, "0")}</span>
+                            <span className="flex-1">{st.title}</span>
+                            {!building && i + 1 < step && <span className="text-xs">✓</span>}
                           </button>
                         </li>
                       ))}
                     </ol>
-                  </div>
+                  </>
+                )}
 
-                  {/* Cut list */}
-                  <div className="overflow-hidden rounded-lg border border-line bg-panel">
-                    <div className="border-b border-line px-6 py-4">
-                      <p className="text-xs tracking-[0.25em] text-ink/55">部品リスト（切り出し表）</p>
-                    </div>
+                {tab === "parts" && (
+                  <div className="space-y-4">
                     {partsBySource.map(([source, list]) => (
-                      <div key={source} className="border-b border-line/60 px-6 py-4 last:border-b-0">
-                        <p className="mb-2 text-sm font-medium text-accent">{source}</p>
-                        <ul className="space-y-1">
+                      <div key={source}>
+                        <p className="mb-1 text-[11px] tracking-[0.2em] text-white/45">{source}</p>
+                        <ul>
                           {list.map((p) => (
                             <li key={p.id}>
                               <button
                                 onClick={() => selectPart(p)}
                                 className={`grid w-full grid-cols-[auto_1fr_auto] items-baseline gap-3 rounded-lg px-2 py-2 text-left text-sm transition ${
-                                  selectedId === p.id ? "bg-accent text-paper" : "hover:bg-line/30"
+                                  selectedId === p.id ? "bg-white text-black" : "hover:bg-white/[0.06]"
                                 }`}
                               >
-                                <span
-                                  className="h-3 w-3 translate-y-0.5 rounded-sm border border-ink/20"
-                                  style={{ background: p.color }}
-                                />
+                                <span className="h-3 w-3 translate-y-0.5 rounded-sm border border-white/20" style={{ background: p.color }} />
                                 <span>
                                   {p.name}
-                                  <span className={`ml-2 text-xs ${selectedId === p.id ? "text-paper/75" : "text-ink/55"}`}>
+                                  <span className={`ml-2 text-xs ${selectedId === p.id ? "text-black/60" : "text-white/50"}`}>
                                     {p.dimensions}
                                   </span>
                                 </span>
-                                <span className={`font-mono text-xs ${selectedId === p.id ? "text-paper/75" : "text-ink/40"}`}>
+                                <span className={`font-mono text-[11px] ${selectedId === p.id ? "text-black/60" : "text-white/35"}`}>
                                   手順{p.step}
                                 </span>
                               </button>
@@ -743,36 +740,41 @@ export default function MakePage() {
                       </div>
                     ))}
                   </div>
+                )}
 
-                  {/* Tools & materials */}
-                  <div className="grid grid-cols-2 gap-6 rounded-lg border border-line bg-panel p-6 text-sm">
-                    <div>
-                      <p className="mb-3 text-xs tracking-[0.25em] text-ink/55">道具</p>
-                      <ul className="space-y-1 font-light">
-                        {bp.tools.map((t) => (
-                          <li key={t}>{t}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="mb-3 text-xs tracking-[0.25em] text-ink/55">素材</p>
-                      <ul className="space-y-1 font-light">
-                        {bp.detected.materials.map((m) => (
-                          <li key={m}>{m}</li>
-                        ))}
-                      </ul>
+                {tab === "info" && (
+                  <div className="text-sm">
+                    <div className="grid grid-cols-2 gap-5">
+                      <div>
+                        <p className="mb-2 text-[11px] tracking-[0.2em] text-white/45">道具</p>
+                        <ul className="space-y-1 font-light">
+                          {bp.tools.map((t) => (
+                            <li key={t}>{t}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[11px] tracking-[0.2em] text-white/45">素材</p>
+                        <ul className="space-y-1 font-light">
+                          {bp.detected.materials.map((m) => (
+                            <li key={m}>{m}</li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
-            </>
+            </aside>
           )}
         </section>
-      </main>
+      )}
 
-      <footer className="border-t border-line px-6 py-8 text-xs tracking-[0.2em] text-ink/45">
-        <div className="mx-auto max-w-7xl">BAKERU — いらないものが、使えるものに化ける。</div>
-      </footer>
+      {!bp && !request && (
+        <footer className="border-t border-line px-6 py-8 text-xs tracking-[0.2em] text-ink/45">
+          <div className="mx-auto max-w-7xl">化けラボ — いらないものが、使えるものに化ける。</div>
+        </footer>
+      )}
     </div>
   );
 }
@@ -786,21 +788,12 @@ function Label({ n, text }: { n: string; text: string }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-r border-line px-6 py-4 last:border-r-0">
-      <dt className="text-[11px] tracking-[0.2em] text-ink/55">{label}</dt>
-      <dd className="mt-1 text-2xl font-light">{value}</dd>
-    </div>
-  );
-}
-
 function RoundBtn({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
       aria-label={label}
-      className="h-10 w-10 shrink-0 rounded-full border border-ink/25 bg-panel text-sm transition hover:border-ink"
+      className="h-9 w-9 shrink-0 rounded-full text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
     >
       {children}
     </button>

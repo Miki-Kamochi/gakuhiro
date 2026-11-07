@@ -387,7 +387,7 @@
     el("span", "font-size:17px;font-weight:600;letter-spacing:.08em;color:#f9edf0;", "化ける"),
     el("span", "font-size:11px;color:rgba(249,237,240,.6);", "ゴミで作る"),
   );
-  fab.title = "BAKERU — 買う前に、ゴミで作れるか見てみる";
+  fab.title = "化けラボ — 買う前に、ゴミで作れるか見てみる";
   fab.addEventListener("mouseenter", () => (fab.style.transform = "scale(1.05)"));
   fab.addEventListener("mouseleave", () => (fab.style.transform = "none"));
   fab.addEventListener("click", run);

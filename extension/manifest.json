@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "BAKERU 化けるボタン",
+  "name": "化けラボ 化けるボタン",
   "version": "1.0.0",
   "description": "買う前に、ゴミで作れるか見てみる。ショップの商品ページに「化ける」ボタンを表示します。",
   "content_scripts": [
