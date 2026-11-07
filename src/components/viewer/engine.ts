@@ -219,7 +219,8 @@ export class ViewerEngine {
 
     // Don't burn GPU when the viewer is scrolled off-screen.
     this.intersectionObserver = new IntersectionObserver((entries) => {
-      this.visible = entries[0]?.isIntersecting ?? true;
+      // Entries can arrive batched (e.g. during a smooth scroll): the last one is current.
+      this.visible = entries[entries.length - 1]?.isIntersecting ?? true;
       this.setRunning(this.visible);
     });
     this.intersectionObserver.observe(mount);
